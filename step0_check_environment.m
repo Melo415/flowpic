@@ -19,31 +19,41 @@ else
 end
 
 %% 2. 检查必需的工具箱
-fprintf('\n[2/6] 检查必需工具箱...\n');
+fprintf('[2/6] 检查必需工具箱...\n');
 
-% 修正：使用MATLAB官方标准的工具箱授权ID
-required_toolboxes = {
-    'Deep Learning Toolbox', 'Deep_Learning_Toolbox';          % 修正后的DL工具箱ID
-    'Statistics and Machine Learning Toolbox', 'Statistics_Machine_Learning'; % 修正后的统计工具箱ID
-};
+% 初始化状态标记（关键：定义后续逻辑需要的变量）
+dl_ok = false;
+stat_ok = false;
+all_installed = false; % 定义原脚本需要的all_installed变量
 
-all_installed = true;
-for i = 1:size(required_toolboxes, 1)
-    toolbox_name = required_toolboxes{i, 1};
-    toolbox_id = required_toolboxes{i, 2};
-    
-    % license('test', id) 返回1表示授权可用，0表示不可用
-    if license('test', toolbox_id)
-        fprintf('  ✓ %s: 已安装\n', toolbox_name);
-    else
-        fprintf('  ✗ %s: 未安装\n', toolbox_name);
-        all_installed = false;
-    end
+% 检查Deep Learning Toolbox
+try
+    convolution2dLayer(3, 16);
+    dl_ok = true;
+    fprintf('  ✓ Deep Learning Toolbox: 已安装\n');
+catch
+    fprintf('  ✗ Deep Learning Toolbox: 未安装/不可用\n');
 end
 
+% 检查Statistics and Machine Learning Toolbox
+try
+    ttest(randn(10,1));
+    stat_ok = true;
+    fprintf('  ✓ Statistics and Machine Learning Toolbox: 已安装\n');
+catch
+    fprintf('  ✗ Statistics and Machine Learning Toolbox: 未安装/不可用\n');
+end
+
+% 核心：更新all_installed变量（匹配原脚本逻辑）
+all_installed = dl_ok && stat_ok;
+
+% 输出警告
 if ~all_installed
     fprintf('\n  警告：缺少必需工具箱，请安装后继续\n');
+else
+    fprintf('\n  所有必需工具箱均已安装\n');
 end
+
 %% 3. 检查可选工具箱（GPU支持）
 fprintf('\n[3/6] 检查GPU支持...\n');
 
@@ -133,10 +143,8 @@ fprintf('====================================================\n');
 if all_installed && all_files_exist
     fprintf('✓ 所有检查通过！可以开始使用。\n\n');
     fprintf('下一步操作：\n');
-    fprintf('  1. 运行 step1_generate_sample_data.m 生成示例数据\n');
-    fprintf('  2. 运行 step2_test_flowpic.m 测试FlowPic生成\n');
-    fprintf('  3. 运行 step3_test_model.m 测试模型创建\n');
-    fprintf('  4. 运行 step4_full_training.m 完整训练\n');
+    fprintf('运行 step1_generate_sample_data.m 生成示例数据\n');
+
 else
     fprintf('⚠ 存在问题，请先解决上述错误\n');
 end

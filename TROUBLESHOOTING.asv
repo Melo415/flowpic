@@ -2,26 +2,74 @@
 
 ## 🔴 步骤0：环境检查失败
 
-### 问题1：MATLAB版本不足
-```
-✗ MATLAB版本: 2019b (需要 R2020a 或更高)
-```
-
-**解决方案：**
-- 方案A：升级MATLAB到R2020a或更新版本
-- 方案B：修改代码以兼容旧版本（不推荐）
-
-**验证：**
-```matlab
-version('-release')  % 应显示 '2020a' 或更高
-```
-
----
 
 ### 问题2：缺少Deep Learning Toolbox
 ```
 ✗ Deep Learning Toolbox: 未安装
 ```
+# 解决代码
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% FlowPic工具箱验证脚本（最终无错版，适配MATLAB R2024b）
+% 修复containers.Map索引类型问题 + 移除所有不稳定的license调用
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+clear; clc;
+
+fprintf('====================================================\n');
+fprintf('   FlowPic 工具箱验证脚本 (R2024b最终版)\n');
+fprintf('====================================================\n\n');
+
+% 改用结构体存储状态（避免containers.Map的类型问题，更简单稳定）
+toolboxStatus.dl_toolbox = false;    % Deep Learning Toolbox
+toolboxStatus.stat_toolbox = false;  % Statistics and Machine Learning Toolbox
+toolboxNames = {
+    'Deep Learning Toolbox', 
+    'Statistics and Machine Learning Toolbox'
+};
+
+% 1. 验证Deep Learning Toolbox
+fprintf('[1/2] 验证Deep Learning Toolbox...\n');
+try
+    % 调用DL工具箱核心函数（无副作用，仅验证可用性）
+    dummyLayer = convolution2dLayer(3, 16); 
+    clear dummyLayer; 
+    toolboxStatus.dl_toolbox = true;
+    fprintf('  ✓ Deep Learning Toolbox: 可用\n\n');
+catch ME
+    fprintf('  ✗ Deep Learning Toolbox: 不可用\n');
+    fprintf('    错误原因: %s\n\n', ME.message);
+end
+
+% 2. 验证Statistics and Machine Learning Toolbox
+fprintf('[2/2] 验证Statistics and Machine Learning Toolbox...\n');
+try
+    % 调用统计工具箱核心函数
+    dummyData = randn(10, 1); 
+    [~, ~] = ttest(dummyData); 
+    clear dummyData; 
+    toolboxStatus.stat_toolbox = true;
+    fprintf('  ✓ Statistics and Machine Learning Toolbox: 可用\n\n');
+catch ME
+    fprintf('  ✗ Statistics and Machine Learning Toolbox: 不可用\n');
+    fprintf('    错误原因: %s\n\n', ME.message);
+end
+
+% 3. 输出最终结论（修复索引问题）
+fprintf('====================================================\n');
+allAvailable = toolboxStatus.dl_toolbox && toolboxStatus.stat_toolbox;
+
+if ~toolboxStatus.dl_toolbox
+    fprintf('⚠ 缺失必需工具箱: %s\n', toolboxNames{1});
+end
+if ~toolboxStatus.stat_toolbox
+    fprintf('⚠ 缺失必需工具箱: %s\n', toolboxNames{2});
+end
+
+if allAvailable
+    fprintf('✅ 所有必需工具箱均可用！\n');
+else
+    fprintf('❌ 部分工具箱不可用，请检查安装状态\n');
+end
+fprintf('====================================================\n');
 
 **解决方案：**
 1. 打开MATLAB

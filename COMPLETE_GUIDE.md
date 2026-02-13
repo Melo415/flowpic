@@ -14,6 +14,7 @@ flowpic_project/
 ├── generate_flowpic.m              # FlowPic生成函数
 ├── create_flowpic_model.m          # 模型创建函数
 ├── load_pcap_data.m                # 数据加载工具
+|—— load_mirage_json.m              # 数据集加载工具
 │
 ├── data/                           # 数据目录
 ├── models/                         # 模型目录
@@ -597,3 +598,111 @@ gpuDevice;
 完整流程预计总时间：**1-2小时**（首次运行）
 
 如有问题，请逐步检查每个步骤的输出是否符合预期。
+
+
+
+## load_mirage_json.m 运行结果
+====================================================
+   测试MIRAGE-19 JSON数据加载
+====================================================
+
+[1/4] 检查JSON文件结构...
+  读取文件: D:\Desktop\GitHub\flowpic\data\mirage\Mi5\1494596297_air.com.hypah.io.slither_MIRAGE-2019_traffic_dataset_labeled_biflows.json
+  ✓ 该文件包含 57 个flows
+
+  第一个Flow ID: x192_168_20_105_35639_216_58_214_74_443_6
+  Flow数据字段: packet_data, flow_features, flow_metadata
+    - packet_data: struct
+      子字段: src_port, dst_port, packet_dir, L4_payload_bytes, iat, TCP_win_size, L4_raw_payload
+        - src_port: 维度 [32 1]
+        - dst_port: 维度 [32 1]
+        - packet_dir: 维度 [32 1]
+        - L4_payload_bytes: 维度 [32 1]
+        - iat: 维度 [32 1]
+        - TCP_win_size: 维度 [32 1]
+    - flow_features: struct
+    - flow_metadata: struct
+
+[2/4] 提取应用标签...
+  文件名: 1494596297_air.com.hypah.io.slither_MIRAGE-2019_traffic_dataset_labeled_biflows
+  ✓ 提取的应用标签: slither
+
+[3/4] 测试数据提取...
+  正在尝试提取包信息...
+  ✓ 找到 L4_payload_bytes: 32 个包
+  ✓ 从iat计算时间戳: 32 个时间点
+    时间范围: [0.000000, 0.817567] 秒
+  ✓ 找到 packet_dir
+    方向值: [0;1]
+
+  前10个包的详细信息:
+    No.      Time(s)     Size       Dir
+  ----------------------------------------
+      1     0.000000        0         0
+      2     0.000000        0         1
+      3     0.023969        0         0
+      4     0.026995      185         0
+      5     0.032993        0         1
+      6     0.057946     1418         1
+      7     0.066958     1418         1
+      8     0.066967      773         1
+      9     0.066974        0         0
+     10     0.072994        0         0
+
+[4/4] 测试完整数据集加载...
+  数据集路径: D:\Desktop\GitHub\flowpic\data\mirage
+正在加载MIRAGE-19 JSON数据集...
+找到 1642 个JSON文件
+正在处理JSON文件.................................................................................................................................................................... 完成!
+
+数据集统计:
+  总流数: 102269
+  类别数: 18
+  类别: slither, groupon, tripadvisor, android, duolingo, subito, voip, music, iliga, comics, pinterest, trello, foursquared, katana, orca, wish, youtube, waze
+
+类别分布:
+  1. slither        :   2548 (2.5%)
+  2. groupon        :   1760 (1.7%)
+  3. tripadvisor    :   3053 (3.0%)
+  4. android        :  17518 (17.1%)
+  5. duolingo       :   7423 (7.3%)
+  6. subito         :   7258 (7.1%)
+  7. voip           :   2577 (2.5%)
+  8. music          :   5573 (5.4%)
+  9. iliga          :  10442 (10.2%)
+  10. comics         :   5284 (5.2%)
+  11. pinterest      :   3604 (3.5%)
+  12. trello         :   1895 (1.9%)
+  13. foursquared    :   5999 (5.9%)
+  14. katana         :   4205 (4.1%)
+  15. orca           :   2294 (2.2%)
+  16. wish           :   5385 (5.3%)
+  17. youtube        :   3956 (3.9%)
+  18. waze           :  11495 (11.2%)
+
+包统计:
+  平均包数/流: 24.9
+  包数范围: [10, 32]
+
+  ✓ 数据加载成功！
+    总流数: 102269
+    类别数: 18
+
+  包统计:
+    平均包数/流: 24.9
+    最少包数: 10
+    最多包数: 32
+
+  随机显示一个flow:
+    类别: duolingo
+    包数: 25
+    时间范围: [0.000, 5.009] 秒
+    长度范围: [40, 1418] 字节
+    方向分布: 上行=25, 下行=0
+
+====================================================
+   测试完成！
+====================================================
+
+如果所有步骤都成功，可以继续运行:
+  step4_train_mirage
