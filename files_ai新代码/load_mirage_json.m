@@ -1,6 +1,10 @@
+% load_mirage_json 是数据加载函数，不是专门的预处理函数
+% 它的核心是把 JSON 文件中的原始流量数据读取为 MATLAB 可操作的结构体
+% 仅附带 “让数据可用” 的基础预处理；
+
 function [flows, labels, class_names] = load_mirage_json(dataset_path)
-% 从MIRAGE-19 JSON文件加载网络流数据
-% 
+% 从MIRAGE-19 JSON文件加载网络流数据（适配L4_payload_bytes/packet_dir/iat字段）
+% text 测试结果加载完成！总流数: 122007, 类别数: 18
 % 输入:
 %   dataset_path: MIRAGE数据集路径（包含JSON文件的文件夹）
 % 输出:
@@ -68,16 +72,21 @@ for f = 1:length(json_files)
             flow_data = data.(flow_id);
             
             % flow_data应该包含包信息
-            % 可能的字段：packets, ipPacketSizes, ipPacketTimestamps等
+            % 适配实际字段：L4_payload_bytes/packet_dir/iat
             
-            % 尝试提取包信息
-            % 方式1：packet_data 结构（MIRAGE-19新格式）
+            % 初始化变量
+            lengths = [];
+            times = [];
+            directions = [];
+            
+            % 方式1：适配MIRAGE-2019新格式（你的数据结构）
             if isfield(flow_data, 'packet_data')
                 pkt_data = flow_data.packet_data;
                 
-                % 尝试各种可能的字段名
-                % 长度
-                if isfield(pkt_data, 'packet_sizes')
+                % ========== 核心修改1：适配L4_payload_bytes（包长度） ==========
+                if isfield(pkt_data, 'L4_payload_bytes')
+                    lengths = pkt_data.L4_payload_bytes;
+                elseif isfield(pkt_data, 'packet_sizes')
                     lengths = pkt_data.packet_sizes;
                 elseif isfield(pkt_data, 'sizes')
                     lengths = pkt_data.sizes;
@@ -87,8 +96,16 @@ for f = 1:length(json_files)
                     continue;  % 无法提取长度，跳过此flow
                 end
                 
-                % 时间戳
-                if isfield(pkt_data, 'packet_times')
+                % ========== 核心修改2：适配iat（计算绝对时间） ==========
+                if isfield(pkt_data, 'iat')
+                    % iat是包间间隔，需计算绝对时间（从0开始）
+                    iat_1d = pkt_data.iat(:)';  % 转为一维行向量
+                    if length(iat_1d) == length(lengths)-1
+                        times = cumsum([0, iat_1d]);  % 0 + 第一个iat + 第二个iat...
+                    else
+                        times = cumsum([0, iat_1d(1:min(end, length(lengths)-1))]);
+                    end
+                elseif isfield(pkt_data, 'packet_times')
                     times = pkt_data.packet_times;
                 elseif isfield(pkt_data, 'timestamps')
                     times = pkt_data.timestamps;
@@ -99,8 +116,10 @@ for f = 1:length(json_files)
                     times = (0:length(lengths)-1)' * 0.001;
                 end
                 
-                % 方向
-                if isfield(pkt_data, 'packet_directions')
+                % ========== 核心修改3：适配packet_dir（方向） ==========
+                if isfield(pkt_data, 'packet_dir')
+                    directions = pkt_data.packet_dir;
+                elseif isfield(pkt_data, 'packet_directions')
                     directions = pkt_data.packet_directions;
                 elseif isfield(pkt_data, 'directions')
                     directions = pkt_data.directions;
@@ -168,7 +187,8 @@ for f = 1:length(json_files)
                 continue;
             end
             
-            % 转换为列向量
+            % ========== 核心修改4：统一维度（解决维度不一致问题） ==========
+            % 转为列向量，确保维度统一
             times = times(:);
             lengths = lengths(:);
             directions = directions(:);
@@ -191,7 +211,7 @@ for f = 1:length(json_files)
             lengths = lengths(valid_idx);
             directions = directions(valid_idx);
             
-            % 至少要有10个包
+            % 至少要有10个包（可根据需求调整）
             if length(times) >= 10
                 flow = struct();
                 flow.lengths = lengths;

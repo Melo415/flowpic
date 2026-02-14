@@ -31,10 +31,9 @@ rng(42);
 
 % 1. 数据路径
 DATASET_PATH = 'D:\Desktop\GitHub\flowpic\data\mirage';  % MIRAGE数据集路径
-
 % 2. 数据量控制
 USE_SUBSET = true;        % 是否使用数据子集
-SUBSET_SIZE = 2000;       % 子集大小（建议：测试用1000-2000，正式训练用全部）
+SUBSET_SIZE = 10000;       % 子集大小（建议：测试用1000-2000，正式训练用全部）
 
 % 3. FlowPic配置
 FLOWPIC_SIZE = 32;        % FlowPic大小（32x32，论文标准）
@@ -43,8 +42,8 @@ NUM_CHANNELS = 4;         % 通道数（4通道：上下行长度+IAT）
 % 4. 训练超参数
 MAX_EPOCHS = 50;          % 训练轮数
 BATCH_SIZE = 64;          % 批大小（GPU内存不足时改为32）
-LEARNING_RATE = 0.001;    % 初始学习率
-L2_REG = 0.0001;          % L2正则化
+LEARNING_RATE = 0.0005;    % 初始学习率
+L2_REG = 0.001;          % L2正则化
 
 % 5. 输出配置
 SAVE_MODEL = true;        % 是否保存模型
