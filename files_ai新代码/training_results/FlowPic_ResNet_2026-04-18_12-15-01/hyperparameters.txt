@@ -1,0 +1,12 @@
+FlowPic ResNet 实验记录
+时间: 18-Apr-2026 12:15:01
+
+=== 核心超参数 ===
+Epochs          : 150
+Batch Size      : 128
+Learning Rate   : 0.000500
+L2 Regularization: 0.000100
+FlowPic Size    : 32x32x4
+Execution Env   : gpu
+Class Weights   : true
+Dropout Rate    : 建议0.35~0.4（当前模型中为0.2，可进一步调高）

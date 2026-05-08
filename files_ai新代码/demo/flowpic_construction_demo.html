@@ -1,0 +1,364 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans);color:var(--color-text-primary)}
+.wrap{padding:1.5rem 0}
+.step-nav{display:flex;gap:8px;margin-bottom:1.5rem;flex-wrap:wrap}
+.step-btn{padding:6px 14px;font-size:13px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-md);background:transparent;color:var(--color-text-secondary);cursor:pointer;transition:all .15s}
+.step-btn.active{background:var(--color-background-secondary);color:var(--color-text-primary);border-color:var(--color-border-primary)}
+.panel{display:none}.panel.active{display:block}
+.label{font-size:12px;color:var(--color-text-secondary);margin-bottom:4px}
+.title{font-size:15px;font-weight:500;margin-bottom:6px}
+.desc{font-size:13px;color:var(--color-text-secondary);line-height:1.6;margin-bottom:16px}
+canvas{display:block}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.card{border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:12px}
+.pkt-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}
+.pkt-box{width:32px;height:22px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:500;flex-shrink:0}
+.up{background:#B5D4F4;color:#0C447C}
+.dn{background:#F5C4B3;color:#712B13}
+.arrow{color:var(--color-text-secondary);font-size:11px}
+.tag{font-size:11px;padding:2px 6px;border-radius:3px;font-weight:500}
+.tag-up{background:#E6F1FB;color:#185FA5}
+.tag-dn{background:#FAECE7;color:#993C1D}
+.heatmap-wrap{position:relative}
+.heatmap-label{font-size:11px;color:var(--color-text-secondary);text-align:center;margin-top:4px}
+.ch-title{font-size:12px;font-weight:500;margin-bottom:4px;text-align:center}
+.formula{font-family:var(--font-mono);font-size:12px;background:var(--color-background-secondary);padding:8px 12px;border-radius:var(--border-radius-md);margin:8px 0;color:var(--color-text-primary)}
+.stat{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary)}
+.stat span:last-child{color:var(--color-text-primary);font-weight:500}
+</style>
+
+<div class="wrap">
+<div class="step-nav" id="nav"></div>
+<div id="panels"></div>
+</div>
+
+<script>
+const SEED = 42;
+function seededRand(s){let x=Math.sin(s)*10000;return x-Math.floor(x)}
+
+function genFlow(appType){
+  const pkts=[];
+  let t=0;
+  const configs={
+    video:{n:200,upLen:[40,80],dnLen:[800,1460],upRatio:0.15,iatUp:[0.01,0.05],iatDn:[0.005,0.02]},
+    game:{n:150,upLen:[60,200],dnLen:[60,200],upRatio:0.5,iatUp:[0.015,0.025],iatDn:[0.015,0.025]},
+    browse:{n:80,upLen:[100,400],dnLen:[400,1460],upRatio:0.2,iatUp:[0.05,0.3],iatDn:[0.01,0.1]}
+  };
+  const c=configs[appType]||configs.browse;
+  for(let i=0;i<c.n;i++){
+    const isUp=Math.random()<c.upRatio;
+    const iat=isUp?(c.iatUp[0]+Math.random()*(c.iatUp[1]-c.iatUp[0])):(c.iatDn[0]+Math.random()*(c.iatDn[1]-c.iatDn[0]));
+    t+=iat;
+    if(t>15)break;
+    const lenRange=isUp?c.upLen:c.dnLen;
+    const len=Math.floor(lenRange[0]+Math.random()*(lenRange[1]-lenRange[0]));
+    pkts.push({t,len,dir:isUp?1:-1,iat:i===0?0:iat});
+  }
+  return pkts;
+}
+
+function buildHist(pkts,filterDir,yMode,size){
+  const H=Array.from({length:size},()=>new Array(size).fill(0));
+  const sub=pkts.filter(p=>p.dir===filterDir);
+  if(sub.length===0)return H;
+  const MAX_T=15,MTU=1460;
+  let iatVals=sub.map(p=>p.iat);
+  const iatMax=Math.max(...iatVals)*0.95||0.1;
+  sub.forEach(p=>{
+    const xBin=Math.min(size-1,Math.floor(p.t/MAX_T*size));
+    let yBin;
+    if(yMode==='len'){yBin=Math.min(size-1,Math.floor(p.len/MTU*size));}
+    else{yBin=Math.min(size-1,Math.floor(p.iat/iatMax*size));}
+    H[size-1-yBin][xBin]++;
+  });
+  return H;
+}
+
+function log1p2d(H){
+  return H.map(row=>row.map(v=>Math.log1p(v)));
+}
+function normalize2d(H){
+  let mx=0;
+  H.forEach(row=>row.forEach(v=>{if(v>mx)mx=v;}));
+  if(mx===0)return H;
+  return H.map(row=>row.map(v=>v/mx));
+}
+
+function drawHeatmap(canvas,H,colorFn){
+  const size=H.length;
+  const s=canvas.width/size;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let r=0;r<size;r++)for(let c=0;c<size;c++){
+    const v=H[r][c];
+    ctx.fillStyle=colorFn(v);
+    ctx.fillRect(c*s,r*s,s,s);
+  }
+}
+
+function blueColor(v){
+  const t=Math.min(1,v);
+  if(t===0)return'#0a0a14';
+  const r=Math.round(20+t*(55-20));
+  const g=Math.round(20+t*(150-20));
+  const b=Math.round(20+t*(240-20));
+  return`rgb(${r},${g},${b})`;
+}
+function orangeColor(v){
+  const t=Math.min(1,v);
+  if(t===0)return'#0a0a14';
+  const r=Math.round(20+t*(240-20));
+  const g=Math.round(20+t*(120-20));
+  const b=Math.round(20+t*(20));
+  return`rgb(${r},${g},${b})`;
+}
+function greenColor(v){
+  const t=Math.min(1,v);
+  if(t===0)return'#0a0a14';
+  return`rgb(${Math.round(20+t*30)},${Math.round(20+t*200)},${Math.round(20+t*80)})`;
+}
+function purpleColor(v){
+  const t=Math.min(1,v);
+  if(t===0)return'#0a0a14';
+  return`rgb(${Math.round(20+t*160)},${Math.round(20+t*60)},${Math.round(20+t*220)})`;
+}
+
+const colors=[blueColor,orangeColor,greenColor,purpleColor];
+const chLabels=['Ch1 上行包长','Ch2 下行包长','Ch3 上行IAT','Ch4 下行IAT'];
+
+const steps=[
+  {id:'s0',label:'① 原始流量'},
+  {id:'s1',label:'② 分离方向'},
+  {id:'s2',label:'③ 构建直方图'},
+  {id:'s3',label:'④ 归一化'},
+  {id:'s4',label:'⑤ 四通道FlowPic'},
+];
+
+const nav=document.getElementById('nav');
+const panels=document.getElementById('panels');
+steps.forEach((s,i)=>{
+  const btn=document.createElement('button');
+  btn.className='step-btn'+(i===0?' active':'');
+  btn.textContent=s.label;
+  btn.onclick=()=>{
+    document.querySelectorAll('.step-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(s.id).classList.add('active');
+  };
+  nav.appendChild(btn);
+  const div=document.createElement('div');
+  div.className='panel'+(i===0?' active':'');
+  div.id=s.id;
+  panels.appendChild(div);
+});
+
+const appType='video';
+const pkts=genFlow(appType);
+const upPkts=pkts.filter(p=>p.dir===1);
+const dnPkts=pkts.filter(p=>p.dir===-1);
+
+const SIZE=32;
+const Hup_len=normalize2d(log1p2d(buildHist(pkts,1,'len',SIZE)));
+const Hdn_len=normalize2d(log1p2d(buildHist(pkts,-1,'len',SIZE)));
+const Hup_iat=normalize2d(log1p2d(buildHist(pkts,1,'iat',SIZE)));
+const Hdn_iat=normalize2d(log1p2d(buildHist(pkts,-1,'iat',SIZE)));
+const Hs=[Hup_len,Hdn_len,Hup_iat,Hdn_iat];
+
+// Panel 0: 原始流量
+(()=>{
+  const d=document.getElementById('s0');
+  d.innerHTML=`
+    <p class="title">一条视频流的原始数据包</p>
+    <p class="desc">每个数据包有三个关键属性：时间戳、包长度、传输方向。下面展示前15个包：</p>
+    <div class="grid2">
+      <div>
+        <div class="label">数据包列表（前15个）</div>
+        <div id="pktlist"></div>
+      </div>
+      <div>
+        <div class="label">包长度时间序列</div>
+        <canvas id="tsChart" width="300" height="200"></canvas>
+        <div style="display:flex;gap:12px;margin-top:6px">
+          <span class="tag tag-up">上行 ${upPkts.length}个</span>
+          <span class="tag tag-dn">下行 ${dnPkts.length}个</span>
+        </div>
+      </div>
+    </div>
+  `;
+  const list=document.getElementById('pktlist');
+  pkts.slice(0,15).forEach((p,i)=>{
+    const isUp=p.dir===1;
+    list.innerHTML+=`<div class="pkt-row">
+      <span style="font-size:11px;color:var(--color-text-secondary);width:16px">${i+1}</span>
+      <div class="pkt-box ${isUp?'up':'dn'}">${isUp?'↑':'↓'}</div>
+      <span style="flex:1">${p.len}字节</span>
+      <span style="color:var(--color-text-secondary);font-size:11px">${p.t.toFixed(2)}s</span>
+    </div>`;
+  });
+  const c=document.getElementById('tsChart');
+  const ctx=c.getContext('2d');
+  const maxT=15,maxL=1460;
+  ctx.fillStyle='#111';
+  ctx.fillRect(0,0,c.width,c.height);
+  pkts.forEach(p=>{
+    const x=p.t/maxT*c.width;
+    const h=Math.max(2,p.len/maxL*(c.height-10));
+    const y=c.height-h;
+    ctx.fillStyle=p.dir===1?'#378ADD':'#D85A30';
+    ctx.fillRect(x-1,y,2,h);
+  });
+  ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.lineWidth=0.5;
+  ctx.strokeRect(0,0,c.width,c.height);
+  ctx.fillStyle='rgba(255,255,255,0.5)';ctx.font='10px sans-serif';
+  ctx.fillText('0s',2,c.height-2);ctx.fillText('15s',c.width-22,c.height-2);
+  ctx.fillText('1460B',2,10);
+})();
+
+// Panel 1: 分离方向
+(()=>{
+  const d=document.getElementById('s1');
+  d.innerHTML=`
+    <p class="title">按方向分离，提取IAT</p>
+    <p class="desc">上行（客户端→服务器）和下行（服务器→客户端）分别处理，IAT = 相邻包时间差。</p>
+    <div class="grid2">
+      <div class="card">
+        <div class="ch-title" style="color:#185FA5">上行流量 ↑ (${upPkts.length}个包)</div>
+        <div class="formula">IAT[i] = t[i] - t[i-1]</div>
+        ${upPkts.slice(0,6).map((p,i)=>`
+        <div class="stat"><span>包${i+1}: t=${p.t.toFixed(2)}s, len=${p.len}</span><span>IAT=${p.iat.toFixed(3)}s</span></div>
+        `).join('')}
+        <div class="stat" style="margin-top:4px"><span>平均包长</span><span>${Math.round(upPkts.reduce((s,p)=>s+p.len,0)/upPkts.length)}字节</span></div>
+      </div>
+      <div class="card">
+        <div class="ch-title" style="color:#993C1D">下行流量 ↓ (${dnPkts.length}个包)</div>
+        <div class="formula">IAT[i] = t[i] - t[i-1]</div>
+        ${dnPkts.slice(0,6).map((p,i)=>`
+        <div class="stat"><span>包${i+1}: t=${p.t.toFixed(2)}s, len=${p.len}</span><span>IAT=${p.iat.toFixed(3)}s</span></div>
+        `).join('')}
+        <div class="stat" style="margin-top:4px"><span>平均包长</span><span>${Math.round(dnPkts.reduce((s,p)=>s+p.len,0)/dnPkts.length)}字节</span></div>
+      </div>
+    </div>
+    <p class="desc" style="margin-top:12px">视频流特征明显：下行包普遍更大（800-1460字节），下行数量远多于上行。</p>
+  `;
+})();
+
+// Panel 2: 构建直方图
+(()=>{
+  const d=document.getElementById('s2');
+  d.innerHTML=`
+    <p class="title">把包投票到32×32格子</p>
+    <p class="desc">X轴 = 时间（0~15秒分32格），Y轴 = 包长度或IAT，每个包根据坐标+1投票。</p>
+    <div class="formula">x_bin = floor(t / 15 * 32)　　y_bin = floor(len / 1460 * 32)</div>
+    <div class="grid2" style="margin-top:12px">
+      <div>
+        <div class="ch-title">原始计数直方图（上行包长）</div>
+        <canvas id="rawHist" width="200" height="200"></canvas>
+        <div class="heatmap-label">时间 →（0~15秒）</div>
+      </div>
+      <div>
+        <div style="margin-top:8px">
+          <div class="label">问题：数值分布极不均匀</div>
+          <canvas id="distChart" width="200" height="130"></canvas>
+          <p class="desc" style="margin-top:8px;font-size:12px">大量格子=0，少数热点格子计数很高，直接输入CNN会导致梯度被热点主导。</p>
+        </div>
+      </div>
+    </div>
+  `;
+  const rawH=buildHist(pkts,1,'len',SIZE);
+  const c=document.getElementById('rawHist');
+  let mx=0;rawH.forEach(r=>r.forEach(v=>{if(v>mx)mx=v;}));
+  drawHeatmap(c,rawH,v=>{
+    const t=mx>0?v/mx:0;
+    if(t===0)return'#111';
+    return`rgb(${Math.round(20+t*55)},${Math.round(20+t*150)},${Math.round(20+t*240)})`;
+  });
+  const allVals=[];rawH.forEach(r=>r.forEach(v=>allVals.push(v)));
+  const zeros=allVals.filter(v=>v===0).length;
+  const dc=document.getElementById('distChart');
+  const ctx=dc.getContext('2d');
+  ctx.fillStyle='#111';ctx.fillRect(0,0,dc.width,dc.height);
+  const bins=10;const binCounts=new Array(bins).fill(0);
+  const maxV=Math.max(...allVals)||1;
+  allVals.forEach(v=>{const b=Math.min(bins-1,Math.floor(v/maxV*bins));binCounts[b]++;});
+  const maxBin=Math.max(...binCounts);
+  binCounts.forEach((cnt,i)=>{
+    const x=i/bins*dc.width;const w=dc.width/bins-2;
+    const h=cnt/maxBin*(dc.height-20);
+    ctx.fillStyle='#378ADD';
+    ctx.fillRect(x+1,dc.height-20-h,w,h);
+  });
+  ctx.fillStyle='rgba(255,255,255,0.6)';ctx.font='10px sans-serif';
+  ctx.fillText(`零值格子: ${zeros}/${SIZE*SIZE} (${Math.round(zeros/SIZE/SIZE*100)}%)`,4,12);
+})();
+
+// Panel 3: 归一化
+(()=>{
+  const d=document.getElementById('s3');
+  d.innerHTML=`
+    <p class="title">log1p压缩 + 归一化到[0,1]</p>
+    <p class="desc">两步处理让数值分布均匀，消除流量规模差异的影响。</p>
+    <div class="grid2">
+      <div>
+        <div class="label">归一化前（原始计数）</div>
+        <canvas id="beforeNorm" width="200" height="200"></canvas>
+        <div class="formula" style="font-size:11px">值域：0 ~ ${(()=>{const H=buildHist(pkts,1,'len',SIZE);let m=0;H.forEach(r=>r.forEach(v=>{if(v>m)m=v;}));return m;})()}</div>
+      </div>
+      <div>
+        <div class="label">归一化后（log1p → /max）</div>
+        <canvas id="afterNorm" width="200" height="200"></canvas>
+        <div class="formula" style="font-size:11px">值域：0.00 ~ 1.00</div>
+      </div>
+    </div>
+    <div style="margin-top:12px;padding:10px;background:var(--color-background-secondary);border-radius:var(--border-radius-md)">
+      <div style="font-size:12px;font-weight:500;margin-bottom:6px">变换过程</div>
+      <div style="font-size:12px;color:var(--color-text-secondary);line-height:1.8">
+        计数=5 → log(1+5)=1.79 → /max=0.41<br>
+        计数=0 → log(1+0)=0.00 → /max=0.00<br>
+        计数=20 → log(1+20)=3.04 → /max=0.70
+      </div>
+    </div>
+  `;
+  const rawH=buildHist(pkts,1,'len',SIZE);
+  let mx=0;rawH.forEach(r=>r.forEach(v=>{if(v>mx)mx=v;}));
+  drawHeatmap(document.getElementById('beforeNorm'),rawH,v=>{
+    const t=mx>0?v/mx:0;
+    if(t===0)return'#111';
+    return`rgb(${Math.round(20+t*55)},${Math.round(20+t*150)},${Math.round(20+t*240)})`;
+  });
+  drawHeatmap(document.getElementById('afterNorm'),Hup_len,blueColor);
+})();
+
+// Panel 4: 四通道
+(()=>{
+  const d=document.getElementById('s4');
+  d.innerHTML=`
+    <p class="title">合并为32×32×4的FlowPic</p>
+    <p class="desc">4个通道叠加，类似RGB图像但有4个颜色平面，输入CNN提取空间特征。</p>
+    <div class="grid4" id="chGrid"></div>
+    <div style="margin-top:16px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);overflow:hidden">
+      <div style="padding:10px 12px;background:var(--color-background-secondary);font-size:13px;font-weight:500">视频流的视觉特征（可以跟游戏流、网页流对比）</div>
+      <div style="padding:10px 12px;font-size:12px;color:var(--color-text-secondary);line-height:1.8">
+        Ch2下行包长亮度高且集中在大尺寸区域 → 大量大包持续下载<br>
+        Ch1上行包长稀疏且集中在小尺寸 → ACK确认包为主<br>
+        Ch4下行IAT密集且规律 → 服务器持续推流节律稳定
+      </div>
+    </div>
+  `;
+  const grid=document.getElementById('chGrid');
+  const cfns=[blueColor,orangeColor,greenColor,purpleColor];
+  Hs.forEach((H,i)=>{
+    const div=document.createElement('div');
+    div.innerHTML=`<div class="ch-title" style="font-size:11px">${chLabels[i]}</div>`;
+    const c=document.createElement('canvas');
+    c.width=120;c.height=120;
+    drawHeatmap(c,H,cfns[i]);
+    c.style.width='100%';c.style.borderRadius='4px';
+    div.appendChild(c);
+    grid.appendChild(div);
+  });
+})();
+</script>

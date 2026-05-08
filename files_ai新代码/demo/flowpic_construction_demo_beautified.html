@@ -1,0 +1,1051 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlowPic 构建流程演示</title>
+  <style>
+    :root{
+      --bg:#0b1020;
+      --bg-soft:#121932;
+      --panel:#121a2f;
+      --panel-2:#18223d;
+      --panel-3:#1d2744;
+      --line:rgba(255,255,255,0.08);
+      --line-strong:rgba(255,255,255,0.16);
+      --text:#eef4ff;
+      --text-soft:#a8b3cf;
+      --text-dim:#7f8bab;
+      --blue:#5aa9ff;
+      --blue-2:#8ec7ff;
+      --orange:#ff9a68;
+      --orange-2:#ffbe9b;
+      --green:#59d88a;
+      --purple:#ba8cff;
+      --shadow:0 18px 48px rgba(0,0,0,.28);
+      --shadow-soft:0 10px 28px rgba(0,0,0,.18);
+      --radius-xl:24px;
+      --radius-lg:18px;
+      --radius-md:14px;
+      --radius-sm:10px;
+      --font-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{min-height:100%}
+    body{
+      font-family:var(--font-sans);
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(89,216,138,.10), transparent 32%),
+        radial-gradient(circle at 85% 10%, rgba(90,169,255,.16), transparent 26%),
+        radial-gradient(circle at 50% 100%, rgba(186,140,255,.10), transparent 30%),
+        linear-gradient(180deg, #0b1020 0%, #0d1326 35%, #0a1020 100%);
+      padding:32px 18px 48px;
+    }
+
+    .page{
+      max-width:1180px;
+      margin:0 auto;
+    }
+
+    .hero{
+      position:relative;
+      overflow:hidden;
+      padding:28px;
+      border:1px solid var(--line);
+      border-radius:28px;
+      background:linear-gradient(135deg, rgba(24,34,61,.92), rgba(15,22,41,.96));
+      box-shadow:var(--shadow);
+      margin-bottom:24px;
+    }
+    .hero::before,
+    .hero::after{
+      content:"";
+      position:absolute;
+      border-radius:999px;
+      filter:blur(10px);
+      pointer-events:none;
+    }
+    .hero::before{
+      width:240px;height:240px;
+      right:-80px;top:-80px;
+      background:radial-gradient(circle, rgba(90,169,255,.25), transparent 65%);
+    }
+    .hero::after{
+      width:220px;height:220px;
+      left:-70px;bottom:-90px;
+      background:radial-gradient(circle, rgba(255,154,104,.18), transparent 65%);
+    }
+
+    .hero-top{
+      display:flex;
+      justify-content:space-between;
+      gap:18px;
+      align-items:flex-start;
+      margin-bottom:20px;
+      flex-wrap:wrap;
+      position:relative;
+      z-index:1;
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 12px;
+      border-radius:999px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.08);
+      color:var(--blue-2);
+      font-size:12px;
+      margin-bottom:14px;
+      backdrop-filter:blur(8px);
+    }
+    .hero h1{
+      font-size:clamp(28px, 5vw, 40px);
+      line-height:1.1;
+      letter-spacing:.3px;
+      margin-bottom:10px;
+      font-weight:800;
+    }
+    .hero p{
+      color:var(--text-soft);
+      font-size:15px;
+      line-height:1.85;
+      max-width:760px;
+    }
+
+    .hero-badges{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-self:flex-start;
+    }
+    .hero-badge{
+      padding:9px 12px;
+      background:rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;
+      color:var(--text-soft);
+      font-size:12px;
+      white-space:nowrap;
+    }
+
+    .hero-stats{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:14px;
+      position:relative;
+      z-index:1;
+    }
+    .hero-stat{
+      padding:16px 16px 14px;
+      border-radius:18px;
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
+      border:1px solid rgba(255,255,255,.08);
+      box-shadow:var(--shadow-soft);
+      min-height:94px;
+    }
+    .hero-stat .k{
+      font-size:12px;
+      color:var(--text-dim);
+      margin-bottom:10px;
+    }
+    .hero-stat .v{
+      font-size:24px;
+      font-weight:800;
+      letter-spacing:.3px;
+      margin-bottom:6px;
+    }
+    .hero-stat .sub{
+      color:var(--text-soft);
+      font-size:12px;
+    }
+
+    .wrap{
+      padding:0;
+    }
+
+    .step-shell{
+      margin-top:18px;
+      padding:18px;
+      border-radius:24px;
+      background:linear-gradient(180deg, rgba(18,26,47,.95), rgba(13,19,35,.97));
+      border:1px solid var(--line);
+      box-shadow:var(--shadow);
+    }
+
+    .step-nav{
+      display:flex;
+      gap:10px;
+      margin-bottom:20px;
+      flex-wrap:wrap;
+    }
+    .step-btn{
+      position:relative;
+      padding:11px 16px;
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.2px;
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:999px;
+      background:rgba(255,255,255,.035);
+      color:var(--text-soft);
+      cursor:pointer;
+      transition:transform .18s ease, background .18s ease, border-color .18s ease, color .18s ease, box-shadow .18s ease;
+      backdrop-filter:blur(10px);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.03);
+    }
+    .step-btn:hover{
+      transform:translateY(-1px);
+      color:var(--text);
+      border-color:rgba(90,169,255,.35);
+      background:rgba(90,169,255,.08);
+    }
+    .step-btn.active{
+      color:#fff;
+      border-color:rgba(90,169,255,.42);
+      background:linear-gradient(135deg, rgba(90,169,255,.24), rgba(186,140,255,.16));
+      box-shadow:0 8px 18px rgba(90,169,255,.15);
+    }
+
+    .panel{
+      display:none;
+      animation:fadeUp .28s ease;
+    }
+    .panel.active{display:block}
+
+    @keyframes fadeUp{
+      from{opacity:0;transform:translateY(8px)}
+      to{opacity:1;transform:translateY(0)}
+    }
+
+    .panel-card{
+      border-radius:22px;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(19,28,52,.98), rgba(13,19,35,.98));
+      padding:24px;
+      overflow:hidden;
+      position:relative;
+    }
+    .panel-card::before{
+      content:"";
+      position:absolute;
+      inset:0 0 auto 0;
+      height:1px;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,.14), transparent);
+      pointer-events:none;
+    }
+
+    .panel-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:18px;
+      margin-bottom:18px;
+      flex-wrap:wrap;
+    }
+    .label{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      font-size:12px;
+      color:var(--blue-2);
+      margin-bottom:10px;
+      padding:7px 11px;
+      border-radius:999px;
+      background:rgba(90,169,255,.10);
+      border:1px solid rgba(90,169,255,.20);
+    }
+    .title{
+      font-size:28px;
+      line-height:1.2;
+      font-weight:800;
+      margin-bottom:8px;
+      letter-spacing:.2px;
+    }
+    .desc{
+      font-size:14px;
+      color:var(--text-soft);
+      line-height:1.85;
+      margin-bottom:16px;
+      max-width:860px;
+    }
+
+    .mini-note{
+      align-self:flex-start;
+      padding:12px 14px;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+      background:rgba(255,255,255,.035);
+      color:var(--text-soft);
+      min-width:210px;
+      font-size:12px;
+      line-height:1.7;
+    }
+    .mini-note strong{color:#fff}
+
+    .grid2{display:grid;grid-template-columns:1.08fr .92fr;gap:18px}
+    .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+
+    .card,
+    .soft-card,
+    .viz-card,
+    .insight-card{
+      border-radius:20px;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.02));
+      box-shadow:var(--shadow-soft);
+    }
+    .card{padding:16px}
+    .soft-card{padding:16px}
+    .viz-card{padding:16px; min-height:100%}
+    .insight-card{padding:18px}
+
+    .section-title{
+      font-size:13px;
+      font-weight:700;
+      color:#fff;
+      margin-bottom:12px;
+      letter-spacing:.2px;
+    }
+    .section-sub{
+      font-size:12px;
+      color:var(--text-dim);
+      margin-top:-4px;
+      margin-bottom:14px;
+      line-height:1.7;
+    }
+
+    .pkt-list{
+      display:grid;
+      gap:10px;
+    }
+    .pkt-row{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:10px 12px;
+      border-radius:14px;
+      background:rgba(255,255,255,.03);
+      border:1px solid rgba(255,255,255,.05);
+      font-size:13px;
+    }
+    .pkt-index{
+      width:24px;
+      text-align:center;
+      font-size:11px;
+      color:var(--text-dim);
+      font-weight:700;
+      flex-shrink:0;
+    }
+    .pkt-box{
+      width:34px;height:24px;border-radius:8px;
+      display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:800;flex-shrink:0;
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.15);
+    }
+    .up{background:rgba(90,169,255,.18);color:#b7dcff;border:1px solid rgba(90,169,255,.25)}
+    .dn{background:rgba(255,154,104,.18);color:#ffd1bb;border:1px solid rgba(255,154,104,.25)}
+    .pkt-main{flex:1;color:var(--text)}
+    .pkt-meta{color:var(--text-dim);font-size:11px}
+
+    .tag-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    .tag{
+      font-size:11px;padding:7px 10px;border-radius:999px;font-weight:700;
+      border:1px solid transparent;
+      letter-spacing:.2px;
+    }
+    .tag-up{background:rgba(90,169,255,.10);color:#b8dcff;border-color:rgba(90,169,255,.22)}
+    .tag-dn{background:rgba(255,154,104,.10);color:#ffd1bb;border-color:rgba(255,154,104,.22)}
+    .tag-green{background:rgba(89,216,138,.10);color:#bff0cf;border-color:rgba(89,216,138,.20)}
+    .tag-purple{background:rgba(186,140,255,.10);color:#ddc6ff;border-color:rgba(186,140,255,.20)}
+
+    .canvas-wrap{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      min-height:240px;
+      border-radius:18px;
+      background:linear-gradient(180deg, rgba(8,12,25,.95), rgba(12,17,33,.96));
+      border:1px solid rgba(255,255,255,.06);
+      padding:12px;
+      overflow:hidden;
+    }
+    canvas{
+      display:block;
+      max-width:100%;
+      height:auto;
+      border-radius:12px;
+    }
+
+    .chart-caption,
+    .heatmap-label{
+      font-size:12px;
+      color:var(--text-dim);
+      text-align:center;
+      margin-top:10px;
+      line-height:1.7;
+    }
+
+    .ch-title{
+      font-size:13px;
+      font-weight:800;
+      margin-bottom:12px;
+      text-align:center;
+      letter-spacing:.15px;
+    }
+    .formula{
+      font-family:var(--font-mono);
+      font-size:12px;
+      background:rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.06);
+      padding:10px 12px;
+      border-radius:14px;
+      margin:10px 0 12px;
+      color:#dce7ff;
+      overflow:auto;
+      white-space:nowrap;
+    }
+    .stat{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      font-size:12px;
+      padding:10px 0;
+      border-bottom:1px solid rgba(255,255,255,.06);
+      color:var(--text-soft);
+    }
+    .stat:last-child{border-bottom:none}
+    .stat span:last-child{color:var(--text);font-weight:700;white-space:nowrap}
+
+    .split-highlight{
+      margin-top:14px;
+      padding:14px 16px;
+      border-radius:16px;
+      background:linear-gradient(90deg, rgba(90,169,255,.10), rgba(255,154,104,.08));
+      border:1px solid rgba(255,255,255,.06);
+      color:var(--text-soft);
+      font-size:13px;
+      line-height:1.85;
+    }
+
+    .comparison-grid{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:18px;
+      align-items:start;
+    }
+
+    .transform-box{
+      margin-top:14px;
+      padding:16px;
+      background:linear-gradient(180deg, rgba(90,169,255,.07), rgba(186,140,255,.06));
+      border:1px solid rgba(255,255,255,.07);
+      border-radius:18px;
+    }
+    .transform-title{
+      font-size:13px;
+      font-weight:800;
+      margin-bottom:8px;
+    }
+    .transform-lines{
+      font-size:13px;
+      color:var(--text-soft);
+      line-height:2;
+    }
+
+    .channel-card{
+      padding:14px;
+      border-radius:18px;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025));
+      box-shadow:var(--shadow-soft);
+    }
+    .channel-meta{
+      text-align:center;
+      color:var(--text-dim);
+      font-size:11px;
+      margin-top:10px;
+    }
+
+    .insight-list{
+      display:grid;
+      gap:10px;
+      margin-top:6px;
+    }
+    .insight-item{
+      padding:12px 14px;
+      border-radius:14px;
+      background:rgba(255,255,255,.035);
+      border:1px solid rgba(255,255,255,.05);
+      color:var(--text-soft);
+      font-size:13px;
+      line-height:1.8;
+    }
+
+    .footer-note{
+      margin-top:16px;
+      text-align:center;
+      color:var(--text-dim);
+      font-size:12px;
+    }
+
+    @media (max-width: 980px){
+      .hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .grid2,.comparison-grid{grid-template-columns:1fr}
+      .grid4{grid-template-columns:repeat(2,1fr)}
+      .panel-head{flex-direction:column}
+      .mini-note{width:100%}
+    }
+
+    @media (max-width: 640px){
+      body{padding:18px 12px 28px}
+      .hero,.step-shell,.panel-card{padding:18px}
+      .hero h1{font-size:26px}
+      .title{font-size:22px}
+      .grid4{grid-template-columns:1fr}
+      .hero-stats{grid-template-columns:1fr}
+      .step-btn{width:100%;justify-content:center}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <div class="eyebrow">◎ FlowPic · 流量到图像的可视化构建</div>
+          <h1>把一串离散的数据包，整理成<br>神经网络更容易理解的“视觉指纹”</h1>
+          <p>
+            这个页面完整展示了 FlowPic 的生成过程：从原始流量、方向分离、二维直方图构建，到 log 压缩和四通道融合。
+            功能逻辑保持不变，只对页面的视觉表达、层次结构和交互观感做了增强，让它更适合演示、汇报和答辩展示。
+          </p>
+        </div>
+        <div class="hero-badges">
+          <div class="hero-badge">32 × 32 网格</div>
+          <div class="hero-badge">4 通道输入</div>
+          <div class="hero-badge">视频流示例</div>
+        </div>
+      </div>
+      <div class="hero-stats" id="heroStats"></div>
+    </section>
+
+    <div class="wrap">
+      <div class="step-shell">
+        <div class="step-nav" id="nav"></div>
+        <div id="panels"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const SEED = 42;
+    function seededRand(s){let x=Math.sin(s)*10000;return x-Math.floor(x)}
+
+    function genFlow(appType){
+      const pkts=[];
+      let t=0;
+      const configs={
+        video:{n:200,upLen:[40,80],dnLen:[800,1460],upRatio:0.15,iatUp:[0.01,0.05],iatDn:[0.005,0.02]},
+        game:{n:150,upLen:[60,200],dnLen:[60,200],upRatio:0.5,iatUp:[0.015,0.025],iatDn:[0.015,0.025]},
+        browse:{n:80,upLen:[100,400],dnLen:[400,1460],upRatio:0.2,iatUp:[0.05,0.3],iatDn:[0.01,0.1]}
+      };
+      const c=configs[appType]||configs.browse;
+      for(let i=0;i<c.n;i++){
+        const isUp=Math.random()<c.upRatio;
+        const iat=isUp
+          ? (c.iatUp[0]+Math.random()*(c.iatUp[1]-c.iatUp[0]))
+          : (c.iatDn[0]+Math.random()*(c.iatDn[1]-c.iatDn[0]));
+        t+=iat;
+        if(t>15)break;
+        const lenRange=isUp?c.upLen:c.dnLen;
+        const len=Math.floor(lenRange[0]+Math.random()*(lenRange[1]-lenRange[0]));
+        pkts.push({t,len,dir:isUp?1:-1,iat:i===0?0:iat});
+      }
+      return pkts;
+    }
+
+    function buildHist(pkts,filterDir,yMode,size){
+      const H=Array.from({length:size},()=>new Array(size).fill(0));
+      const sub=pkts.filter(p=>p.dir===filterDir);
+      if(sub.length===0)return H;
+      const MAX_T=15,MTU=1460;
+      const iatVals=sub.map(p=>p.iat);
+      const iatMax=Math.max(...iatVals)*0.95||0.1;
+      sub.forEach(p=>{
+        const xBin=Math.min(size-1,Math.floor(p.t/MAX_T*size));
+        let yBin;
+        if(yMode==='len') yBin=Math.min(size-1,Math.floor(p.len/MTU*size));
+        else yBin=Math.min(size-1,Math.floor(p.iat/iatMax*size));
+        H[size-1-yBin][xBin]++;
+      });
+      return H;
+    }
+
+    function log1p2d(H){
+      return H.map(row=>row.map(v=>Math.log1p(v)));
+    }
+    function normalize2d(H){
+      let mx=0;
+      H.forEach(row=>row.forEach(v=>{if(v>mx)mx=v;}));
+      if(mx===0)return H;
+      return H.map(row=>row.map(v=>v/mx));
+    }
+
+    function drawHeatmap(canvas,H,colorFn){
+      const size=H.length;
+      const s=canvas.width/size;
+      const ctx=canvas.getContext('2d');
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      for(let r=0;r<size;r++){
+        for(let c=0;c<size;c++){
+          const v=H[r][c];
+          ctx.fillStyle=colorFn(v);
+          ctx.fillRect(c*s,r*s,s,s);
+        }
+      }
+    }
+
+    function blueColor(v){
+      const t=Math.min(1,v);
+      if(t===0)return'#0a0a14';
+      const r=Math.round(20+t*(55-20));
+      const g=Math.round(20+t*(150-20));
+      const b=Math.round(20+t*(240-20));
+      return`rgb(${r},${g},${b})`;
+    }
+    function orangeColor(v){
+      const t=Math.min(1,v);
+      if(t===0)return'#0a0a14';
+      const r=Math.round(20+t*(240-20));
+      const g=Math.round(20+t*(120-20));
+      const b=Math.round(20+t*(20));
+      return`rgb(${r},${g},${b})`;
+    }
+    function greenColor(v){
+      const t=Math.min(1,v);
+      if(t===0)return'#0a0a14';
+      return`rgb(${Math.round(20+t*30)},${Math.round(20+t*200)},${Math.round(20+t*80)})`;
+    }
+    function purpleColor(v){
+      const t=Math.min(1,v);
+      if(t===0)return'#0a0a14';
+      return`rgb(${Math.round(20+t*160)},${Math.round(20+t*60)},${Math.round(20+t*220)})`;
+    }
+
+    const colors=[blueColor,orangeColor,greenColor,purpleColor];
+    const chLabels=['Ch1 上行包长','Ch2 下行包长','Ch3 上行IAT','Ch4 下行IAT'];
+
+    const steps=[
+      {id:'s0',label:'① 原始流量'},
+      {id:'s1',label:'② 分离方向'},
+      {id:'s2',label:'③ 构建直方图'},
+      {id:'s3',label:'④ 归一化'},
+      {id:'s4',label:'⑤ 四通道 FlowPic'},
+    ];
+
+    const nav=document.getElementById('nav');
+    const panels=document.getElementById('panels');
+    steps.forEach((s,i)=>{
+      const btn=document.createElement('button');
+      btn.className='step-btn'+(i===0?' active':'');
+      btn.textContent=s.label;
+      btn.onclick=()=>{
+        document.querySelectorAll('.step-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(s.id).classList.add('active');
+      };
+      nav.appendChild(btn);
+
+      const div=document.createElement('div');
+      div.className='panel'+(i===0?' active':'');
+      div.id=s.id;
+      panels.appendChild(div);
+    });
+
+    const appType='video';
+    const pkts=genFlow(appType);
+    const upPkts=pkts.filter(p=>p.dir===1);
+    const dnPkts=pkts.filter(p=>p.dir===-1);
+
+    const SIZE=32;
+    const Hup_len=normalize2d(log1p2d(buildHist(pkts,1,'len',SIZE)));
+    const Hdn_len=normalize2d(log1p2d(buildHist(pkts,-1,'len',SIZE)));
+    const Hup_iat=normalize2d(log1p2d(buildHist(pkts,1,'iat',SIZE)));
+    const Hdn_iat=normalize2d(log1p2d(buildHist(pkts,-1,'iat',SIZE)));
+    const Hs=[Hup_len,Hdn_len,Hup_iat,Hdn_iat];
+
+    function avg(arr, key){
+      if(!arr.length) return 0;
+      return arr.reduce((s,p)=>s+p[key],0)/arr.length;
+    }
+
+    function maxOfHist(H){
+      let m=0;
+      H.forEach(r=>r.forEach(v=>{if(v>m)m=v;}));
+      return m;
+    }
+
+    function nonZeroCount(H){
+      let n=0;
+      H.forEach(r=>r.forEach(v=>{if(v>0)n++;}));
+      return n;
+    }
+
+    // Hero stats
+    (()=>{
+      const hero=document.getElementById('heroStats');
+      const rawUp=buildHist(pkts,1,'len',SIZE);
+      const blocks=[
+        {k:'总数据包数',v:`${pkts.length}`,sub:'15 秒窗口内的原始包'},
+        {k:'方向占比',v:`↑ ${upPkts.length} / ↓ ${dnPkts.length}`,sub:'上行与下行分离统计'},
+        {k:'平均包长',v:`${Math.round(avg(pkts,'len'))} B`,sub:'所有数据包的平均长度'},
+        {k:'上行非零网格',v:`${nonZeroCount(rawUp)}`,sub:'32×32 中被命中的格子数'}
+      ];
+      hero.innerHTML=blocks.map(item=>`
+        <div class="hero-stat">
+          <div class="k">${item.k}</div>
+          <div class="v">${item.v}</div>
+          <div class="sub">${item.sub}</div>
+        </div>
+      `).join('');
+    })();
+
+    // Panel 0: 原始流量
+    (()=>{
+      const d=document.getElementById('s0');
+      d.innerHTML=`
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="label">STEP 1 · 原始流量观察</div>
+              <p class="title">一条视频流，先从“包”本身开始看</p>
+              <p class="desc">每个数据包都像一粒离散的沙子，单看很碎；但只要把它们按时间、长度和方向排好，就能逐渐显露出流量类型的整体轮廓。下面展示前 15 个包，以及它们随时间分布的形态。</p>
+            </div>
+            <div class="mini-note">
+              <strong>当前样本：</strong>视频流<br>
+              时间窗口：0 ~ 15 秒<br>
+              关键属性：时间戳 / 包长度 / 方向
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="viz-card">
+              <div class="section-title">数据包列表（前 15 个）</div>
+              <div class="section-sub">用最原始的视角看数据：谁在发包、包有多大、发生在什么时候。</div>
+              <div class="pkt-list" id="pktlist"></div>
+            </div>
+
+            <div class="viz-card">
+              <div class="section-title">包长度时间序列</div>
+              <div class="section-sub">横轴是时间，纵向高度近似代表包长度。你能直观看到下行更密、更高，上行更少、更短。</div>
+              <div class="canvas-wrap">
+                <canvas id="tsChart" width="300" height="200"></canvas>
+              </div>
+              <div class="tag-row">
+                <span class="tag tag-up">上行 ${upPkts.length} 个</span>
+                <span class="tag tag-dn">下行 ${dnPkts.length} 个</span>
+                <span class="tag tag-green">平均长度 ${Math.round(avg(pkts,'len'))} B</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const list=document.getElementById('pktlist');
+      pkts.slice(0,15).forEach((p,i)=>{
+        const isUp=p.dir===1;
+        list.innerHTML+=`
+          <div class="pkt-row">
+            <span class="pkt-index">${i+1}</span>
+            <div class="pkt-box ${isUp?'up':'dn'}">${isUp?'↑':'↓'}</div>
+            <span class="pkt-main">${p.len} 字节</span>
+            <span class="pkt-meta">${p.t.toFixed(2)} s</span>
+          </div>
+        `;
+      });
+
+      const c=document.getElementById('tsChart');
+      const ctx=c.getContext('2d');
+      const maxT=15,maxL=1460;
+      ctx.fillStyle='#0c1224';
+      ctx.fillRect(0,0,c.width,c.height);
+
+      // grid lines
+      ctx.strokeStyle='rgba(255,255,255,0.06)';
+      ctx.lineWidth=1;
+      for(let i=1;i<5;i++){
+        const x=i*c.width/5;
+        ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,c.height); ctx.stroke();
+      }
+      for(let i=1;i<4;i++){
+        const y=i*c.height/4;
+        ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(c.width,y); ctx.stroke();
+      }
+
+      pkts.forEach(p=>{
+        const x=p.t/maxT*c.width;
+        const h=Math.max(2,p.len/maxL*(c.height-14));
+        const y=c.height-h;
+        ctx.fillStyle=p.dir===1 ? '#5aa9ff' : '#ff9a68';
+        ctx.fillRect(x-1.5,y,3,h);
+      });
+      ctx.strokeStyle='rgba(255,255,255,0.12)';
+      ctx.strokeRect(0,0,c.width,c.height);
+      ctx.fillStyle='rgba(255,255,255,0.66)';
+      ctx.font='11px sans-serif';
+      ctx.fillText('0s',6,c.height-6);
+      ctx.fillText('15s',c.width-28,c.height-6);
+      ctx.fillText('1460B',8,14);
+    })();
+
+    // Panel 1: 分离方向
+    (()=>{
+      const d=document.getElementById('s1');
+      d.innerHTML=`
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="label">STEP 2 · 方向分离</div>
+              <p class="title">把“来”和“往”拆开，流量结构就开始说话了</p>
+              <p class="desc">如果把上行和下行混在一起，很多模式会互相遮盖。分离之后，你会发现视频流常常表现为：上行少而短，更多是请求和确认；下行多而大，更像持续不断地输送内容。</p>
+            </div>
+            <div class="mini-note">
+              <strong>IAT（到达间隔）</strong><br>
+              IAT[i] = t[i] - t[i-1]<br>
+              它描述的是“包与包之间的节奏”
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <div class="ch-title" style="color:#b7dcff">上行流量 ↑ (${upPkts.length} 个包)</div>
+              <div class="formula">IAT[i] = t[i] - t[i-1]</div>
+              ${upPkts.slice(0,6).map((p,i)=>`
+                <div class="stat"><span>包 ${i+1}: t=${p.t.toFixed(2)}s，len=${p.len}</span><span>IAT=${p.iat.toFixed(3)}s</span></div>
+              `).join('')}
+              <div class="stat" style="margin-top:4px"><span>平均包长</span><span>${Math.round(avg(upPkts,'len'))} 字节</span></div>
+            </div>
+
+            <div class="card">
+              <div class="ch-title" style="color:#ffd1bb">下行流量 ↓ (${dnPkts.length} 个包)</div>
+              <div class="formula">IAT[i] = t[i] - t[i-1]</div>
+              ${dnPkts.slice(0,6).map((p,i)=>`
+                <div class="stat"><span>包 ${i+1}: t=${p.t.toFixed(2)}s，len=${p.len}</span><span>IAT=${p.iat.toFixed(3)}s</span></div>
+              `).join('')}
+              <div class="stat" style="margin-top:4px"><span>平均包长</span><span>${Math.round(avg(dnPkts,'len'))} 字节</span></div>
+            </div>
+          </div>
+
+          <div class="split-highlight">
+            <strong style="color:#fff">视频流的典型直觉：</strong>
+            下行包普遍更大、数量也更多，像一条水流稳定地往客户端灌输内容；
+            上行则更像偶尔抛出的请求和确认信号，轻、短、稀疏。
+          </div>
+        </div>
+      `;
+    })();
+
+    // Panel 2: 构建直方图
+    (()=>{
+      const d=document.getElementById('s2');
+      d.innerHTML=`
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="label">STEP 3 · 二维投票</div>
+              <p class="title">把每个包投进网格里，散点就变成了“热区”</p>
+              <p class="desc">现在不再盯着单个包，而是把它们像投票一样放进 32×32 的格子。横轴代表时间，纵轴代表包长度或 IAT。落在同一个格子的包越多，这个位置就越亮。</p>
+            </div>
+            <div class="mini-note">
+              <strong>网格含义</strong><br>
+              X 轴：0 ~ 15 秒<br>
+              Y 轴：包长 或 IAT<br>
+              每落入一次，计数 +1
+            </div>
+          </div>
+
+          <div class="formula">x_bin = floor(t / 15 * 32)　　y_bin = floor(len / 1460 * 32)</div>
+
+          <div class="comparison-grid" style="margin-top:14px;">
+            <div class="viz-card">
+              <div class="section-title">原始计数直方图（上行包长）</div>
+              <div class="canvas-wrap">
+                <canvas id="rawHist" width="220" height="220"></canvas>
+              </div>
+              <div class="heatmap-label">时间 →（0 ~ 15 秒）</div>
+            </div>
+
+            <div class="viz-card">
+              <div class="section-title">数值分布直方图</div>
+              <div class="section-sub">大部分格子是 0，少数格子非常热。这就是后续需要做 log 压缩的原因。</div>
+              <div class="canvas-wrap" style="min-height:220px;">
+                <canvas id="distChart" width="240" height="150"></canvas>
+              </div>
+              <div class="chart-caption">如果直接输入 CNN，少量热点区域会“太抢眼”，让模型更难关注弱但有用的模式。</div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const rawH=buildHist(pkts,1,'len',SIZE);
+      const c=document.getElementById('rawHist');
+      const mx=maxOfHist(rawH);
+      drawHeatmap(c,rawH,v=>{
+        const t=mx>0?v/mx:0;
+        if(t===0)return'#0d1324';
+        return `rgb(${Math.round(20+t*55)},${Math.round(20+t*150)},${Math.round(20+t*240)})`;
+      });
+
+      const allVals=[]; rawH.forEach(r=>r.forEach(v=>allVals.push(v)));
+      const zeros=allVals.filter(v=>v===0).length;
+      const dc=document.getElementById('distChart');
+      const ctx=dc.getContext('2d');
+      ctx.fillStyle='#0c1224';
+      ctx.fillRect(0,0,dc.width,dc.height);
+
+      ctx.strokeStyle='rgba(255,255,255,0.06)';
+      for(let i=1;i<5;i++){
+        const y=i*(dc.height-22)/5;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(dc.width, y); ctx.stroke();
+      }
+
+      const bins=10;
+      const binCounts=new Array(bins).fill(0);
+      const maxV=Math.max(...allVals)||1;
+      allVals.forEach(v=>{
+        const b=Math.min(bins-1,Math.floor(v/maxV*bins));
+        binCounts[b]++;
+      });
+      const maxBin=Math.max(...binCounts);
+      binCounts.forEach((cnt,i)=>{
+        const x=i/bins*dc.width;
+        const w=dc.width/bins-4;
+        const h=cnt/maxBin*(dc.height-34);
+        const grd=ctx.createLinearGradient(0,dc.height-20-h,0,dc.height-20);
+        grd.addColorStop(0,'#8ec7ff');
+        grd.addColorStop(1,'#5aa9ff');
+        ctx.fillStyle=grd;
+        ctx.fillRect(x+2,dc.height-20-h,w,h);
+      });
+      ctx.fillStyle='rgba(255,255,255,0.72)';
+      ctx.font='11px sans-serif';
+      ctx.fillText(`零值格子: ${zeros}/${SIZE*SIZE} (${Math.round(zeros/SIZE/SIZE*100)}%)`,8,14);
+    })();
+
+    // Panel 3: 归一化
+    (()=>{
+      const d=document.getElementById('s3');
+      const rawH=buildHist(pkts,1,'len',SIZE);
+      d.innerHTML=`
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="label">STEP 4 · 数值压缩与归一化</div>
+              <p class="title">让过亮的热点收敛一点，让微弱结构也能被看见</p>
+              <p class="desc">原始计数的跨度通常很大：有的格子是 0，有的格子可能累积了很多包。先做 log1p 压缩，再缩放到 [0,1]，就像把刺眼的聚光灯调柔，让整张图的信息分布更均衡。</p>
+            </div>
+            <div class="mini-note">
+              <strong>变换顺序</strong><br>
+              1. log(1 + x)<br>
+              2. 再除以最大值<br>
+              结果范围：0 ~ 1
+            </div>
+          </div>
+
+          <div class="comparison-grid">
+            <div class="viz-card">
+              <div class="section-title">归一化前（原始计数）</div>
+              <div class="canvas-wrap">
+                <canvas id="beforeNorm" width="220" height="220"></canvas>
+              </div>
+              <div class="chart-caption">值域：0 ~ ${maxOfHist(rawH)}</div>
+            </div>
+            <div class="viz-card">
+              <div class="section-title">归一化后（log1p → / max）</div>
+              <div class="canvas-wrap">
+                <canvas id="afterNorm" width="220" height="220"></canvas>
+              </div>
+              <div class="chart-caption">值域：0.00 ~ 1.00</div>
+            </div>
+          </div>
+
+          <div class="transform-box">
+            <div class="transform-title">一个直观的理解</div>
+            <div class="transform-lines">
+              计数 = 5 → log(1+5) = 1.79 → /max = 0.41<br>
+              计数 = 0 → log(1+0) = 0.00 → /max = 0.00<br>
+              计数 = 20 → log(1+20) = 3.04 → /max = 0.70
+            </div>
+          </div>
+        </div>
+      `;
+
+      let mx=0; rawH.forEach(r=>r.forEach(v=>{if(v>mx)mx=v;}));
+      drawHeatmap(document.getElementById('beforeNorm'), rawH, v=>{
+        const t=mx>0?v/mx:0;
+        if(t===0)return'#0d1324';
+        return `rgb(${Math.round(20+t*55)},${Math.round(20+t*150)},${Math.round(20+t*240)})`;
+      });
+      drawHeatmap(document.getElementById('afterNorm'), Hup_len, blueColor);
+    })();
+
+    // Panel 4: 四通道
+    (()=>{
+      const d=document.getElementById('s4');
+      d.innerHTML=`
+        <div class="panel-card">
+          <div class="panel-head">
+            <div>
+              <div class="label">STEP 5 · 四通道融合</div>
+              <p class="title">最后拼成一张 32 × 32 × 4 的 FlowPic</p>
+              <p class="desc">这一步就像把四张不同角度的“热成像图”叠在一起：上行包长、下行包长、上行 IAT、下行 IAT。它们共同组成了流量样本的视觉指纹，交给 CNN 去学习空间模式。</p>
+            </div>
+            <div class="mini-note">
+              <strong>类比理解</strong><br>
+              普通图片常见是 RGB 三通道<br>
+              这里是 4 个语义通道<br>
+              但处理方式非常相似
+            </div>
+          </div>
+
+          <div class="grid4" id="chGrid"></div>
+
+          <div class="insight-card" style="margin-top:18px;">
+            <div class="section-title" style="font-size:15px;">视频流的视觉特征总结</div>
+            <div class="insight-list">
+              <div class="insight-item"><strong style="color:#fff">Ch2 下行包长</strong> 亮度更高、集中在大尺寸区域，说明服务器在持续发送大量大包。</div>
+              <div class="insight-item"><strong style="color:#fff">Ch1 上行包长</strong> 更稀疏，且主要落在小包区域，像确认包和轻量请求。</div>
+              <div class="insight-item"><strong style="color:#fff">Ch4 下行 IAT</strong> 分布更密、节奏更规律，符合持续推流的时间结构。</div>
+            </div>
+          </div>
+
+          <div class="footer-note">最终输出：32 × 32 × 4，可直接作为 CNN 的输入样本。</div>
+        </div>
+      `;
+
+      const grid=document.getElementById('chGrid');
+      const cfns=[blueColor,orangeColor,greenColor,purpleColor];
+      Hs.forEach((H,i)=>{
+        const div=document.createElement('div');
+        div.className='channel-card';
+        div.innerHTML=`<div class="ch-title">${chLabels[i]}</div>`;
+        const c=document.createElement('canvas');
+        c.width=150; c.height=150;
+        drawHeatmap(c,H,cfns[i]);
+        c.style.width='100%';
+        c.style.borderRadius='12px';
+        div.appendChild(c);
+        const meta=document.createElement('div');
+        meta.className='channel-meta';
+        meta.textContent = '归一化热力图';
+        div.appendChild(meta);
+        grid.appendChild(div);
+      });
+    })();
+  </script>
+</body>
+</html>

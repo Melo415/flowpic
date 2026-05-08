@@ -25,25 +25,29 @@ fprintf('【第一部分】环境配置\n\n');
 % 设置随机种子（保证结果可重复）
 rng(42);
 
-% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-% ⭐ 配置参数 - 根据你的实际情况修改
-% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+% 配置参数
 
 % 1. 数据路径
 DATASET_PATH = 'D:\Desktop\GitHub\flowpic\data\mirage';  % MIRAGE数据集路径
+
 % 2. 数据量控制
-USE_SUBSET = true;        % 是否使用数据子集
-SUBSET_SIZE = 10000;       % 子集大小（建议：测试用1000-2000，正式训练用全部）
+USE_SUBSET = false;        % 是否使用数据子集
+SUBSET_SIZE = 30000;       % 子集大小（建议：测试用1000-2000，正式训练用全部）
 
 % 3. FlowPic配置
-FLOWPIC_SIZE = 32;        % FlowPic大小（32x32，论文标准）
+FLOWPIC_SIZE = 64;        % FlowPic大小（32x32）
 NUM_CHANNELS = 4;         % 通道数（4通道：上下行长度+IAT）
 
 % 4. 训练超参数
-MAX_EPOCHS = 50;          % 训练轮数
+MAX_EPOCHS = 150;          % 训练轮数
 BATCH_SIZE = 64;          % 批大小（GPU内存不足时改为32）
 LEARNING_RATE = 0.0005;    % 初始学习率
-L2_REG = 0.001;          % L2正则化
+L2_REG = 0.0001;          % L2正则化
+
+% 4.1 数据增强配置（FlowPic是时序直方图，不做会破坏时间语义的增强）
+USE_AUGMENTATION = true;   % 是否启用训练集增强
+AUG_NOISE_PROB = 0.35;     % 弱高斯噪声触发概率
+AUG_NOISE_STD = 0.02;      % 弱高斯噪声强度
 
 % 5. 输出配置
 SAVE_MODEL = true;        % 是否保存模型
@@ -54,13 +58,29 @@ fprintf('配置参数:\n');
 fprintf('  数据路径: %s\n', DATASET_PATH);
 fprintf('  使用子集: %s (%d samples)\n', string(USE_SUBSET), SUBSET_SIZE);
 fprintf('  FlowPic: %dx%dx%d\n', FLOWPIC_SIZE, FLOWPIC_SIZE, NUM_CHANNELS);
-fprintf('  训练: %d epochs, batch=%d, lr=%.4f\n\n', MAX_EPOCHS, BATCH_SIZE, LEARNING_RATE);
+fprintf('  训练: %d epochs, batch=%d, lr=%.4f\n', MAX_EPOCHS, BATCH_SIZE, LEARNING_RATE);
+fprintf('  增强: %s (仅弱高斯噪声, p=%.2f, std=%.3f)\n\n', ...
+        string(USE_AUGMENTATION), AUG_NOISE_PROB, AUG_NOISE_STD);
 
 %% ============================================================
 %% 第二部分：数据加载
 %% ============================================================
 
 fprintf('【第二部分】加载真实数据\n\n');
+
+% ── 缓存路径 ──────────────────────────────────────────
+CACHE_FILE = 'D:\Desktop\GitHub\flowpic\data\flowpic_cache.mat';
+%% 如果换了数据或修改了归一化方式，记得手动删掉缓存文件重新生成。
+
+if exist(CACHE_FILE, 'file')
+    fprintf('发现缓存文件，直接加载...\n');
+    tic;
+    load(CACHE_FILE, 'X', 'Y', 'labels', 'class_names', 'num_samples', 'num_classes');
+    fprintf('✓ 缓存加载完成！用时: %.1f 秒\n\n', toc);
+    % 跳过第二、三、四部分
+else
+    fprintf('未找到缓存，从原始JSON加载...\n');
+
 
 fprintf('正在从 %s 加载MIRAGE数据...\n', DATASET_PATH);
 fprintf('这可能需要几分钟，请耐心等待...\n\n');
@@ -182,8 +202,39 @@ fprintf('✓ FlowPic生成完成\n');
 fprintf('  用时: %.1f 秒 (%.4f 秒/样本)\n', generation_time, generation_time/num_samples);
 fprintf('  数据形状: %s\n', mat2str(size(X)));
 
+% ── 关键改进：对FlowPic做 log1p 归一化 ──────────────────────────
+% 问题：直方图计数值分布极度不均匀（大量0，少量大值）
+%       直接喂给网络会导致梯度爆炸/消失
+% 解决：log(1+x) 压缩计数值，让分布更均匀
+
+fprintf('\n对FlowPic进行log1p归一化...\n');
+X = log1p(X);
+
+% 逐通道标准化到 [0, 1]（对每个样本独立归一化）
+% 这样每张"图"的尺度一致，避免流量大的应用主导训练
+fprintf('逐样本归一化到[0,1]...\n');
+for i = 1:size(X, 4)
+    for c = 1:NUM_CHANNELS
+        channel = X(:,:,c,i);
+        ch_max = max(channel(:));
+        if ch_max > 0
+            X(:,:,c,i) = channel / ch_max;
+        end
+    end
+end
+
+fprintf('✓ 归一化完成\n');
+fprintf('  归一化后数值范围: [%.4f, %.4f]\n', min(X(:)), max(X(:)));
+
 % 转换标签
 Y = categorical(labels);
+
+% ── 保存缓存 ──────────────────────────────────────────
+fprintf('保存缓存文件（下次直接加载）...\n');
+save(CACHE_FILE, 'X', 'Y', 'labels', 'class_names', 'num_samples', 'num_classes', '-v7.3');
+fprintf('✓ 缓存已保存到: %s\n', CACHE_FILE);
+
+end  % 对应第二部分开头的 else
 
 % 检查数据质量
 fprintf('\nFlowPic数据质量检查:\n');
@@ -195,12 +246,14 @@ fprintf('  非零元素: %.1f%%\n', 100 * sum(X(:)~=0) / numel(X));
 %% 第五部分：数据集划分
 %% ============================================================
 
-fprintf('\n【第五部分】划分数据集\n\n');
+fprintf('\n【第五部分】分层划分数据集\n\n');
+fprintf('按照 80%%训练 + 10%%验证 + 10%%测试 划分（分层抽样，保证每类都有代表）...\n');
 
-fprintf('按照 80%%训练 + 10%%验证 + 10%%测试 划分...\n');
+% 使用 Y（类别标签）进行分层抽样
+rng(42);  % 固定随机种子，保证可复现
 
-% 第一次划分：80% vs 20%
-cv1 = cvpartition(num_samples, 'HoldOut', 0.2);
+% 第一步：先划分 90% (train+val) 和 10% test
+cv1 = cvpartition(Y, 'HoldOut', 0.1, 'Stratify', true);
 idx_train_val = training(cv1);
 idx_test = test(cv1);
 
@@ -209,8 +262,9 @@ Y_train_val = Y(idx_train_val);
 X_test = X(:,:,:,idx_test);
 Y_test = Y(idx_test);
 
-% 第二次划分：训练 vs 验证
-cv2 = cvpartition(sum(idx_train_val), 'HoldOut', 0.125);  % 10/80 = 0.125
+% 第二步：从 train_val 中划 1/9 做 val
+% 因为 90% 里的 1/9 正好是整体 10%
+cv2 = cvpartition(Y_train_val, 'HoldOut', 1/9, 'Stratify', true);
 idx_train = training(cv2);
 idx_val = test(cv2);
 
@@ -219,20 +273,38 @@ Y_train = Y_train_val(idx_train);
 X_val = X_train_val(:,:,:,idx_val);
 Y_val = Y_train_val(idx_val);
 
-fprintf('✓ 数据集划分完成\n');
-fprintf('  训练集: %d 样本 (%.1f%%)\n', sum(idx_train), 100*sum(idx_train)/num_samples);
-fprintf('  验证集: %d 样本 (%.1f%%)\n', sum(idx_val), 100*sum(idx_val)/num_samples);
-fprintf('  测试集: %d 样本 (%.1f%%)\n', sum(idx_test), 100*sum(idx_test)/num_samples);
+% 打印划分结果
+fprintf('✓ 分层划分完成\n');
+fprintf(' 训练集: %d 样本 (%.1f%%)\n', length(Y_train), 100*length(Y_train)/num_samples);
+fprintf(' 验证集: %d 样本 (%.1f%%)\n', length(Y_val),   100*length(Y_val)/num_samples);
+fprintf(' 测试集: %d 样本 (%.1f%%)\n', length(Y_test),  100*length(Y_test)/num_samples);
 
-% 检查训练集类别分布
-fprintf('\n训练集类别分布:\n');
-for c = 1:num_classes
-    count = sum(double(Y_train) == c);
-    if count > 0
-        fprintf('  %2d. %-20s: %4d (%.1f%%)\n', ...
-                c, class_names{c}, count, 100*count/length(Y_train));
+% 检查每个集的类别分布
+disp('训练集类别分布:'); tabulate(Y_train);
+disp('验证集类别分布:'); tabulate(Y_val);
+disp('测试集类别分布:'); tabulate(Y_test);
+
+fprintf('【保守版数据增强】只对训练集，保留时序语义...\n');
+if USE_AUGMENTATION
+    for i = 1:size(X_train, 4)
+        img = X_train(:,:,:,i);
+
+        % 仅保留弱高斯噪声：
+        % FlowPic 的横轴是时间，不能做 fliplr / circshift 这类会破坏时间语义的增强
+        if rand < AUG_NOISE_PROB
+            noise = randn(size(img)) * AUG_NOISE_STD;
+            img = img + noise;
+        end
+
+        % 保证数值仍在 [0, 1]
+        X_train(:,:,:,i) = max(0, min(1, img));
     end
+    fprintf('✓ 已完成保守增强：仅弱高斯噪声，不做翻转 / 循环平移 / 随机通道置零\n');
+else
+    fprintf('✓ 已关闭训练集增强，直接使用原始 FlowPic 训练\n');
 end
+
+
 
 %% ============================================================
 %% 第六部分：构建神经网络模型
@@ -258,9 +330,10 @@ end
 layers = lgraph.Layers;
 fprintf('\n模型架构:\n');
 fprintf('  总层数: %d\n', length(layers));
-fprintf('  主要结构: ResNet with 2 residual blocks\n');
+fprintf('  主要结构: ResNet with 3 residual blocks\n');
 fprintf('  - Block 1: 64 filters\n');
-fprintf('  - Block 2: 128 filters\n');
+fprintf('  - Block 2: 128 filters (stride=2)\n');
+fprintf('  - Block 3: 256 filters (stride=2)\n');
 fprintf('  - Classifier: 256 → %d classes\n', num_classes);
 
 %% ============================================================
@@ -269,285 +342,63 @@ fprintf('  - Classifier: 256 → %d classes\n', num_classes);
 
 fprintf('\n【第七部分】配置训练选项\n\n');
 
-% 检测GPU
-use_gpu = false;
-try
-    gpu_device = gpuDevice;
-    use_gpu = true;
-    fprintf('✓ 检测到GPU: %s\n', gpu_device.Name);
-    fprintf('  显存: %.1f GB\n', gpu_device.AvailableMemory / 1024^3);
+% 检测执行环境
+if canUseGPU()
     execution_env = 'gpu';
-catch
-    fprintf('ℹ 未检测到GPU，使用CPU训练\n');
-    fprintf('  提示: GPU训练速度快10-20倍\n');
-    execution_env = 'auto';
-end
-
-fprintf('\n训练超参数:\n');
-fprintf('  ├─ Epochs: %d\n', MAX_EPOCHS);
-fprintf('  ├─ Batch Size: %d\n', BATCH_SIZE);
-fprintf('  ├─ Learning Rate: %.4f\n', LEARNING_RATE);
-fprintf('  ├─ LR Schedule: Piecewise (drop every 20 epochs)\n');
-fprintf('  ├─ L2 Regularization: %.5f\n', L2_REG);
-fprintf('  ├─ Optimizer: Adam\n');
-fprintf('  └─ Execution: %s\n', execution_env);
-
-% 创建训练选项
-options = trainingOptions('adam', ...
-    'MaxEpochs', MAX_EPOCHS, ...
-    'MiniBatchSize', BATCH_SIZE, ...
-    'InitialLearnRate', LEARNING_RATE, ...
-    'LearnRateSchedule', 'piecewise', ...
-    'LearnRateDropFactor', 0.1, ...
-    'LearnRateDropPeriod', 20, ...
-    'L2Regularization', L2_REG, ...
-    'ValidationData', {X_val, Y_val}, ...
-    'ValidationFrequency', max(1, floor(length(Y_train)/BATCH_SIZE)), ...
-    'Shuffle', 'every-epoch', ...
-    'Verbose', true, ...
-    'VerboseFrequency', 5, ...
-    'Plots', 'training-progress', ...
-    'ExecutionEnvironment', execution_env, ...
-    'OutputNetwork', 'best-validation-loss');
-
-% 估算训练时间
-num_batches_per_epoch = ceil(length(Y_train) / BATCH_SIZE);
-fprintf('\n训练规模:\n');
-fprintf('  每个epoch: %d batches\n', num_batches_per_epoch);
-fprintf('  总迭代数: %d\n', num_batches_per_epoch * MAX_EPOCHS);
-
-%% ============================================================
-%% 第八部分：训练模型
-%% ============================================================
-
-fprintf('\n【第八部分】开始训练\n\n');
-fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-fprintf('  训练进度将显示在弹出的窗口中\n');
-fprintf('  请勿关闭MATLAB，训练需要较长时间\n');
-fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n');
-
-training_start = tic;
-
-try
-    net = trainNetwork(X_train, Y_train, lgraph, options);
-    training_time = toc(training_start);
-    
-    fprintf('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    fprintf('✓ 训练完成！\n');
-    fprintf('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-    fprintf('  总用时: %.1f 分钟 (%.1f 小时)\n', ...
-            training_time/60, training_time/3600);
-    
-catch ME
-    fprintf('\n✗ 训练失败: %s\n', ME.message);
-    fprintf('  请检查:\n');
-    fprintf('    1. 内存/显存是否充足\n');
-    fprintf('    2. 数据是否有效\n');
-    fprintf('    3. 如果是GPU错误，尝试使用CPU\n');
-    return;
-end
-
-%% ============================================================
-%% 第九部分：模型评估
-%% ============================================================
-
-fprintf('\n【第九部分】评估模型性能\n\n');
-
-fprintf('在各数据集上评估模型...\n');
-
-% 训练集
-fprintf('\n[训练集]\n');
-Y_train_pred = classify(net, X_train);
-train_accuracy = sum(Y_train_pred == Y_train) / numel(Y_train);
-fprintf('  准确率: %.2f%%\n', train_accuracy * 100);
-
-% 验证集
-fprintf('\n[验证集]\n');
-Y_val_pred = classify(net, X_val);
-val_accuracy = sum(Y_val_pred == Y_val) / numel(Y_val);
-fprintf('  准确率: %.2f%%\n', val_accuracy * 100);
-
-% 测试集
-fprintf('\n[测试集] ⭐ 最终评估指标\n');
-Y_test_pred = classify(net, X_test);
-test_accuracy = sum(Y_test_pred == Y_test) / numel(Y_test);
-fprintf('  准确率: %.2f%%\n', test_accuracy * 100);
-
-% 每类准确率
-fprintf('\n测试集各类别性能:\n');
-fprintf('  %3s %-20s %8s %10s %8s\n', 'ID', '类别', '样本数', '正确数', '准确率');
-fprintf('  %s\n', repmat('-', 1, 60));
-
-class_accuracies = zeros(num_classes, 1);
-for c = 1:num_classes
-    idx_c = double(Y_test) == c;
-    if sum(idx_c) > 0
-        correct = sum(Y_test_pred(idx_c) == Y_test(idx_c));
-        acc_c = correct / sum(idx_c);
-        class_accuracies(c) = acc_c;
-        
-        fprintf('  %3d %-20s %8d %10d %7.1f%%\n', ...
-                c, class_names{c}, sum(idx_c), correct, acc_c*100);
-    end
-end
-
-% 混淆矩阵
-fprintf('\n生成混淆矩阵...\n');
-conf_mat = confusionmat(Y_test, Y_test_pred);
-
-%% ============================================================
-%% 第十部分：保存结果
-%% ============================================================
-
-fprintf('\n【第十部分】保存结果\n\n');
-
-% 保存模型
-if SAVE_MODEL
-    fprintf('保存训练好的模型...\n');
-    
-    results = struct();
-    results.train_accuracy = train_accuracy;
-    results.val_accuracy = val_accuracy;
-    results.test_accuracy = test_accuracy;
-    results.class_accuracies = class_accuracies;
-    results.training_time = training_time;
-    results.class_names = class_names;
-    results.confusion_matrix = conf_mat;
-    results.hyperparameters = struct(...
-        'flowpic_size', FLOWPIC_SIZE, ...
-        'num_channels', NUM_CHANNELS, ...
-        'max_epochs', MAX_EPOCHS, ...
-        'batch_size', BATCH_SIZE, ...
-        'learning_rate', LEARNING_RATE, ...
-        'l2_reg', L2_REG);
-    results.dataset_info = struct(...
-        'num_samples', num_samples, ...
-        'num_classes', num_classes, ...
-        'train_size', length(Y_train), ...
-        'val_size', length(Y_val), ...
-        'test_size', length(Y_test));
-    
-    model_file = sprintf('models/%s.mat', MODEL_NAME);
-    save(model_file, 'net', 'results');
-    fprintf('  ✓ 模型保存到: %s\n', model_file);
-end
-
-% 保存可视化
-if SAVE_FIGURES
-    fprintf('\n生成可视化结果...\n');
-    
-    % 图1: 混淆矩阵
-    fig1 = figure('Position', [100, 100, 800, 700]);
-    cm = confusionchart(Y_test, Y_test_pred);
-    cm.Title = sprintf('混淆矩阵 - 测试集 (准确率: %.2f%%)', test_accuracy * 100);
-    cm.RowSummary = 'row-normalized';
-    cm.ColumnSummary = 'column-normalized';
-    
-    fig1_file = sprintf('figures/%s_confusion.png', MODEL_NAME);
-    saveas(fig1, fig1_file);
-    fprintf('  ✓ 混淆矩阵: %s\n', fig1_file);
-    
-    % 图2: 性能对比
-    fig2 = figure('Position', [100, 100, 1200, 500]);
-    
-    subplot(1, 2, 1);
-    bar([train_accuracy, val_accuracy, test_accuracy] * 100);
-    set(gca, 'XTickLabel', {'训练集', '验证集', '测试集'});
-    ylabel('准确率 (%)');
-    title('整体准确率对比');
-    grid on;
-    ylim([0, 100]);
-    
-    % 添加数值标注
-    hold on;
-    text(1:3, [train_accuracy, val_accuracy, test_accuracy]*100, ...
-         arrayfun(@(x) sprintf('%.2f%%', x), ...
-                  [train_accuracy, val_accuracy, test_accuracy]*100, ...
-                  'UniformOutput', false), ...
-         'HorizontalAlignment', 'center', ...
-         'VerticalAlignment', 'bottom');
-    
-    subplot(1, 2, 2);
-    bar(class_accuracies * 100);
-    set(gca, 'XTickLabel', class_names);
-    ylabel('准确率 (%)');
-    title('各类别准确率（测试集）');
-    grid on;
-    ylim([0, 100]);
-    xtickangle(45);
-    
-    fig2_file = sprintf('figures/%s_performance.png', MODEL_NAME);
-    saveas(fig2, fig2_file);
-    fprintf('  ✓ 性能对比: %s\n', fig2_file);
-end
-
-%% ============================================================
-%% 第十一部分：结果总结
-%% ============================================================
-
-fprintf('\n============================================================\n');
-fprintf('    训练完成总结\n');
-fprintf('============================================================\n\n');
-
-fprintf('【数据集信息】\n');
-fprintf('  数据来源: MIRAGE-19\n');
-fprintf('  总样本数: %d\n', num_samples);
-fprintf('  类别数: %d\n', num_classes);
-fprintf('  训练/验证/测试: %d / %d / %d\n', ...
-        length(Y_train), length(Y_val), length(Y_test));
-
-fprintf('\n【模型配置】\n');
-fprintf('  FlowPic: %dx%dx%d\n', FLOWPIC_SIZE, FLOWPIC_SIZE, NUM_CHANNELS);
-fprintf('  架构: ResNet (2 residual blocks)\n');
-fprintf('  参数量: ~58K\n');
-
-fprintf('\n【训练配置】\n');
-fprintf('  Epochs: %d\n', MAX_EPOCHS);
-fprintf('  Batch Size: %d\n', BATCH_SIZE);
-fprintf('  Learning Rate: %.4f\n', LEARNING_RATE);
-fprintf('  训练时间: %.1f 分钟\n', training_time/60);
-fprintf('  设备: %s\n', execution_env);
-
-fprintf('\n【性能结果】 ⭐\n');
-fprintf('  训练集准确率: %.2f%%\n', train_accuracy * 100);
-fprintf('  验证集准确率: %.2f%%\n', val_accuracy * 100);
-fprintf('  测试集准确率: %.2f%% ← 最终评估指标\n', test_accuracy * 100);
-
-fprintf('\n【论文基准对比】\n');
-fprintf('  论文 (MIRAGE-19, 全数据): 81.10%%\n');
-fprintf('  你的结果: %.2f%%\n', test_accuracy * 100);
-
-if test_accuracy >= 0.75
-    fprintf('  ✓ 性能良好！');
-    if test_accuracy >= 0.80
-        fprintf('达到论文水平！');
-    end
-    fprintf('\n');
-elseif test_accuracy >= 0.60
-    fprintf('  ℹ 性能可接受，可能原因:\n');
-    fprintf('    - 使用了数据子集（非全量）\n');
-    fprintf('    - 可以尝试增加训练数据或epochs\n');
+    fprintf('  └─ Execution: GPU\n');
 else
-    fprintf('  ⚠ 性能较低，建议:\n');
-    fprintf('    - 检查数据质量\n');
-    fprintf('    - 增加训练数据量\n');
-    fprintf('    - 调整超参数\n');
+    execution_env = 'cpu';
+    fprintf('  └─ Execution: CPU（建议使用GPU加速）\n');
 end
 
-fprintf('\n【保存的文件】\n');
-if SAVE_MODEL
-    fprintf('  模型: models/%s.mat\n', MODEL_NAME);
-end
-if SAVE_FIGURES
-    fprintf('  图像: figures/%s_*.png\n', MODEL_NAME);
-end
+% 计算类别权重
+train_labels_num2 = double(Y_train);
+class_counts = histcounts(train_labels_num2, 1:num_classes+1);
+class_weights = 1 ./ (class_counts + 1);
+class_weights = class_weights / sum(class_weights) * num_classes;
+fprintf('类别权重计算完成\n');
 
-fprintf('\n【下一步】\n');
-fprintf('  1. 查看混淆矩阵分析错误类型\n');
-fprintf('  2. 使用更多数据重新训练\n');
-fprintf('  3. 尝试调整超参数优化性能\n');
-fprintf('  4. 在新数据上测试模型泛化能力\n');
+options = trainingOptions('adam', ...
+    'MaxEpochs',          MAX_EPOCHS, ...
+    'MiniBatchSize',      BATCH_SIZE, ...
+    'InitialLearnRate',   LEARNING_RATE, ...
+    'LearnRateSchedule',  'none', ...
+    'LearnRateDropFactor', 0.3, ...          
+    'LearnRateDropPeriod', 50, ...           
+    'L2Regularization',   L2_REG, ...
+    'GradientThreshold',  1.0, ...           % 梯度裁剪，防爆炸
+    'ValidationPatience', 12, ...             % 验证损失连续8次不降就停止
+    'ValidationData',     {X_val, Y_val}, ...
+    'ValidationFrequency', max(1, floor(length(Y_train)/BATCH_SIZE)), ...
+    'Shuffle',            'every-epoch', ...
+    'Verbose',            true, ...
+    'VerboseFrequency',   5, ...
+    'Plots',              'training-progress', ...
+    'ExecutionEnvironment', execution_env, ...
+    'OutputNetwork',      'best-validation-loss');  % 保存验证最优
 
-fprintf('\n============================================================\n');
-fprintf('    全部完成！\n');
-fprintf('============================================================\n\n');
+%% ============================================================
+%% 第八部分：训练模型（使用实验记录函数）
+%% ============================================================
+fprintf('\n【第八部分】启动带完整实验记录的训练...\n');
+
+% 准备超参数结构体（传给记录函数）
+hyperparameters = struct(...
+    'max_epochs', MAX_EPOCHS, ...
+    'batch_size', BATCH_SIZE, ...
+    'learning_rate', LEARNING_RATE, ...
+    'l2_reg', L2_REG, ...
+    'flowpic_size', FLOWPIC_SIZE, ...
+    'num_channels', NUM_CHANNELS, ...
+    'use_augmentation', USE_AUGMENTATION, ...
+    'aug_noise_prob', AUG_NOISE_PROB, ...
+    'aug_noise_std', AUG_NOISE_STD);
+
+% ====================== 核心调用（只保留这一段） ======================
+[net, results, exp_dir] = run_training_with_logging( ...
+    X_train, Y_train, X_val, Y_val, X_test, Y_test, ...
+    lgraph, options, class_names, hyperparameters, class_weights);
+
+fprintf('✅ 训练及所有实验记录完成！\n');
+fprintf('   实验文件夹：%s\n', exp_dir);
+fprintf('   推荐直接打开 experiment_summary.md 查看完整报告\n\n');
