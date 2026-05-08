@@ -202,11 +202,6 @@ fprintf('✓ FlowPic生成完成\n');
 fprintf('  用时: %.1f 秒 (%.4f 秒/样本)\n', generation_time, generation_time/num_samples);
 fprintf('  数据形状: %s\n', mat2str(size(X)));
 
-% ── 关键改进：对FlowPic做 log1p 归一化 ──────────────────────────
-% 问题：直方图计数值分布极度不均匀（大量0，少量大值）
-%       直接喂给网络会导致梯度爆炸/消失
-% 解决：log(1+x) 压缩计数值，让分布更均匀
-
 fprintf('\n对FlowPic进行log1p归一化...\n');
 X = log1p(X);
 
