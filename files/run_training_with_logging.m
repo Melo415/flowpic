@@ -6,7 +6,7 @@ function [net, results, exp_dir] = run_training_with_logging(X_train, Y_train, X
     fprintf('\n【实验记录系统启动】\n');
 
     %% ====================== 1. 创建本次实验文件夹 ======================
-    results_root = "D:\Desktop\GitHub\flowpic\files_ai新代码\training_results";
+    results_root = "D:\Desktop\GitHub\flowpic\files\training_results";
     if ~exist(results_root, 'dir')
         mkdir(results_root);
     end
@@ -116,7 +116,65 @@ function [net, results, exp_dir] = run_training_with_logging(X_train, Y_train, X
     % 尝试记录训练前已存在的 figure，便于后续寻找训练进度图
     figs_before = findall(groot, 'Type', 'Figure');
 
-    net = trainNetwork(X_train, Y_train, lgraph, options);
+    [net, train_info] = trainNetwork(X_train, Y_train, lgraph, options);
+
+    % 从训练历史里提取两个关键指标
+    [~, loss_idx] = min(train_info.ValidationLoss);
+    [~, acc_idx]  = max(train_info.ValidationAccuracy);
+    
+    best_loss_epoch    = loss_idx;
+    best_loss_val      = train_info.ValidationLoss(loss_idx);
+    acc_at_best_loss   = train_info.ValidationAccuracy(loss_idx);
+    
+    best_acc_epoch     = acc_idx;
+    best_acc_val       = train_info.ValidationAccuracy(acc_idx);
+    loss_at_best_acc   = train_info.ValidationLoss(acc_idx);
+    
+    fprintf('\n── 训练结果对比 ──────────────────────────────\n');
+    fprintf('  Loss 最低：第 %2d 轮  Loss=%.4f  对应准确率=%.2f%%\n', ...
+            best_loss_epoch, best_loss_val, acc_at_best_loss);
+    fprintf('  准确率最高：第 %2d 轮  Acc=%.2f%%  对应Loss=%.4f\n', ...
+            best_acc_epoch, best_acc_val, loss_at_best_acc);
+    fprintf('  当前保存模型：Loss 最低（第 %d 轮）\n', best_loss_epoch);
+    fprintf('──────────────────────────────────────────────\n\n');
+    
+    %% ── 绘制并保存训练曲线 ──────────────────────────────
+    fprintf('正在保存训练曲线...\n');
+    
+    % 训练数据是逐 iteration 的，验证数据频率较低，需要对齐 x 轴
+    n_iter     = length(train_info.TrainingLoss);
+    n_val      = length(train_info.ValidationLoss);
+    val_x      = linspace(1, n_iter, n_val);  % 把验证点映射到 iteration 轴
+    
+    fig = figure('Visible', 'off', 'Position', [100, 100, 1000, 420]);
+    
+    % 左图：Loss
+    subplot(1, 2, 1);
+    plot(1:n_iter, train_info.TrainingLoss, 'b-', 'LineWidth', 1.2); hold on;
+    plot(val_x,    train_info.ValidationLoss, 'r-', 'LineWidth', 1.8);
+    xlabel('Iteration'); ylabel('Loss');
+    title('Training & Validation Loss');
+    legend('Train Loss', 'Val Loss', 'Location', 'northeast');
+    grid on; box on;
+    
+    % 右图：Accuracy
+    subplot(1, 2, 2);
+    plot(1:n_iter, train_info.TrainingAccuracy, 'b-', 'LineWidth', 1.2); hold on;
+    plot(val_x,    train_info.ValidationAccuracy, 'r-', 'LineWidth', 1.8);
+    xlabel('Iteration'); ylabel('Accuracy (%)');
+    title('Training & Validation Accuracy');
+    legend('Train Acc', 'Val Acc', 'Location', 'southeast');
+    grid on; box on;
+    
+    sgtitle(sprintf('FlowPic ResNet  |  Best Val Acc: %.2f%%', ...
+            max(train_info.ValidationAccuracy)), 'FontSize', 12);
+    
+    % 保存到实验目录（exp_dir 是 run_training_with_logging 里已有的变量）
+    curve_path = fullfile(exp_dir, 'training_curves.png');
+    exportgraphics(fig, curve_path, 'Resolution', 150);
+    close(fig);
+    fprintf('✓ 训练曲线已保存: %s\n', curve_path);
+
     training_time = toc(training_start);
 
     %% ====================== 5. 评估并保存所有结果 ======================
@@ -186,6 +244,16 @@ function [net, results, exp_dir] = run_training_with_logging(X_train, Y_train, X
     fprintf(fid, '**时间**：%s  \n', exp_info.date);
     fprintf(fid, '**测试准确率**：%.2f%%  \n', test_accuracy * 100);
     fprintf(fid, '**训练时长**：%.1f 分钟\n\n', training_time / 60);
+    
+    fprintf(fid, '## 训练过程最优结果\n\n');
+    fprintf(fid, '| 指标 | 轮次 | 数值 | 对应另一指标 |\n');
+    fprintf(fid, '|------|------|------|--------------|\n');
+    fprintf(fid, '| Loss 最低 | 第 %d 轮 | %.4f | 准确率 %.2f%% |\n', ...
+            best_loss_epoch, best_loss_val, acc_at_best_loss);
+    fprintf(fid, '| 准确率最高 | 第 %d 轮 | %.2f%% | Loss %.4f |\n\n', ...
+            best_acc_epoch, best_acc_val, loss_at_best_acc);
+    fprintf(fid, '> 当前保存模型来自 Loss 最低轮次（第 %d 轮）。\n', best_loss_epoch);
+    fprintf(fid, '> 若两者不在同一轮，说明模型在该轮判对更多但部分错误更自信。\n\n');
 
     fprintf(fid, '## 改进内容\n\n');
 

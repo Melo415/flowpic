@@ -202,8 +202,14 @@ for f = 1:length(json_files)
                 times = times - min(times);
             end
             
-            % 限制包长度范围
-            lengths = max(40, min(1460, abs(lengths)));
+            % 移除零长度包（TCP SYN / ACK / FIN）
+            nonzero_idx = abs(lengths) > 0;
+            lengths    = lengths(nonzero_idx);
+            times      = times(nonzero_idx);
+            directions = directions(nonzero_idx);
+            
+            % 限制有效包的长度范围到 [1, MTU]
+            lengths = min(1460, abs(lengths));
             
             % 只保留前15秒的包
             valid_idx = times <= 15;

@@ -1,12 +1,18 @@
 function lgraph = create_flowpic_model(input_size, num_classes)
 % CREATE_FLOWPIC_MODEL
-% 创建用于 FlowPic 分类的改进版 ResNet CNN 模型
+% 按照 Poliakov et al. (2025) 论文 Figure 2 构建模型
 %
-% 结构特点：
-%   1. 3个残差块（64 → 128 → 256 filters）
-%   2. Global Average Pooling 代替固定尺寸池化
-%   3. Dropout 仅放在分类头
-%   4. 最后一层名称固定为 output，便于训练脚本替换类别权重
+% 架构：
+%   stem: Conv 7x7 → BN → ReLU → MaxPool(stride=2)  [32→16]
+%   残差块1: 64 filters，不下采样                      [16×16]
+%   残差块2: 128 filters，stride=2 下采样              [8×8]
+%   Average Pooling (4×4, stride=4)                    [2×2]  → 展平 512 维
+%   分类头: FC(512→256) → ReLU → FC(256→classes)
+%   Dropout(0.2) 放在两个残差块内 + 分类头前
+%
+% 注意：论文只用 2 个残差块。
+%       论文用 Average Pooling(输出2×2)，不用 Global Average Pooling。
+%       论文用 AdamW，MATLAB 无内置 AdamW，用 Adam + L2 等效。
 
 if nargin < 1
     input_size = [32, 32, 4];
@@ -15,97 +21,92 @@ if nargin < 2
     num_classes = 18;
 end
 
-%% 初始层
-layers = [
+%% Stem（初始层）
+% 32×32 → maxpool → 16×16
+stem = [
     imageInputLayer(input_size, 'Name', 'input', 'Normalization', 'none')
-
-    convolution2dLayer(7, 64, 'Padding', 3, 'Name', 'conv1')
-    batchNormalizationLayer('Name', 'bn1')
-    reluLayer('Name', 'relu1')
-    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'maxpool1')  % 32 -> 16
+    convolution2dLayer(7, 64, 'Padding', 3, 'Name', 'stem_conv')
+    batchNormalizationLayer('Name', 'stem_bn')
+    reluLayer('Name', 'stem_relu')
+    maxPooling2dLayer(2, 'Stride', 2, 'Name', 'stem_pool')   % 32 → 16
 ];
 
-lgraph = layerGraph(layers);
+lgraph = layerGraph(stem);
 
-%% 残差块
-lgraph = addResidualBlock(lgraph, 'maxpool1',  64, 'res1', false);
-lgraph = addResidualBlock(lgraph, 'res1_out', 128, 'res2', true);
-lgraph = addResidualBlock(lgraph, 'res2_out', 256, 'res3', true);
+%% 两个残差块（对应论文 Figure 2）
+% res1: 64 filters，不下采样  → 16×16×64
+% res2: 128 filters，stride=2 → 8×8×128
+lgraph = addResidualBlock(lgraph, 'stem_pool', 64,  'res1', false);
+lgraph = addResidualBlock(lgraph, 'res1_out',  128, 'res2', true);
 
 %% 分类头
-layers_head = [
-    globalAveragePooling2dLayer('Name', 'gap')
-    fullyConnectedLayer(256, 'Name', 'fc1')
-    batchNormalizationLayer('Name', 'bn_fc1')
-    reluLayer('Name', 'relu_fc1')
-    dropoutLayer(0.5, 'Name', 'drop2')
-    fullyConnectedLayer(num_classes, 'Name', 'fc2')
+% AveragePool(4×4) 把 8×8 → 2×2，展平得 128×4 = 512 维
+% FC(512→256) → ReLU → FC(256→classes)
+head = [
+    averagePooling2dLayer(4, 'Stride', 4, 'Name', 'avg_pool')   % 8×8 → 2×2
+    dropoutLayer(0.2, 'Name', 'head_drop')
+    fullyConnectedLayer(512, 'Name', 'fc1')                      % 128ch × 2×2 = 512
+    reluLayer('Name', 'fc1_relu')
+    fullyConnectedLayer(256, 'Name', 'fc2')
+    reluLayer('Name', 'fc2_relu')
+    fullyConnectedLayer(num_classes, 'Name', 'fc_out')
     softmaxLayer('Name', 'softmax')
-    % 这里先用均匀权重占位，训练脚本里会 replaceLayer 注入真实 class weights
+    % 占位 ClassWeights，训练脚本里 replaceLayer 注入真实权重
     classificationLayer('Name', 'output', ...
-        'Classes', categorical(1:num_classes)', ...
+        'Classes',      categorical(1:num_classes)', ...
         'ClassWeights', ones(1, num_classes))
 ];
 
-lgraph = addLayers(lgraph, layers_head);
-lgraph = connectLayers(lgraph, 'res3_out', 'gap');
+lgraph = addLayers(lgraph, head);
+lgraph = connectLayers(lgraph, 'res2_out', 'avg_pool');   % 连接点：res2_out → avg_pool
 
 end
 
 % -------------------------------------------------------------------------
 function lgraph = addResidualBlock(lgraph, prevLayer, numFilters, blockName, downsample)
-% 添加标准残差块（Conv -> BN -> ReLU -> Conv -> BN -> Add -> ReLU）
+% 标准残差块：Conv→BN→ReLU→Dropout→Conv→BN → (+shortcut) → ReLU
+% Dropout(0.2) 在两个 Conv 之间，与论文 Figure 2 对应
 
-if nargin < 5
-    downsample = false;
-end
+if nargin < 5, downsample = false; end
 
 stride = 1;
-if downsample
-    stride = 2;
-end
+if downsample, stride = 2; end
 
-% 主分支
-main_path = [
+% ── 主分支 ──────────────────────────────────────────────────
+main = [
     convolution2dLayer(3, numFilters, 'Padding', 'same', ...
                        'Stride', stride, 'Name', [blockName '_conv1'])
     batchNormalizationLayer('Name', [blockName '_bn1'])
-    reluLayer('Name', [blockName '_relu1'])
-    
-    dropoutLayer(0.15, 'Name', [blockName '_drop'])
-
+    reluLayer('Name',          [blockName '_relu1'])
+    dropoutLayer(0.2, 'Name',  [blockName '_drop'])     % 论文 dropout=0.2
     convolution2dLayer(3, numFilters, 'Padding', 'same', ...
                        'Name', [blockName '_conv2'])
     batchNormalizationLayer('Name', [blockName '_bn2'])
-    
 ];
 
-lgraph = addLayers(lgraph, main_path);
+lgraph = addLayers(lgraph, main);
 lgraph = connectLayers(lgraph, prevLayer, [blockName '_conv1']);
 
-% Shortcut 分支
+% ── Shortcut 分支 ───────────────────────────────────────────
 if downsample
-    shortcut = [
+    sc = [
         convolution2dLayer(1, numFilters, 'Stride', stride, ...
                            'Name', [blockName '_sc_conv'])
         batchNormalizationLayer('Name', [blockName '_sc_bn'])
     ];
-    lgraph = addLayers(lgraph, shortcut);
+    lgraph = addLayers(lgraph, sc);
     lgraph = connectLayers(lgraph, prevLayer, [blockName '_sc_conv']);
-    shortcut_out = [blockName '_sc_bn'];
+    sc_out = [blockName '_sc_bn'];
 else
-    shortcut_out = prevLayer;
+    sc_out = prevLayer;
 end
 
-% Add + ReLU
-add_layer  = additionLayer(2, 'Name', [blockName '_add']);
-relu_layer = reluLayer('Name', [blockName '_out']);
+% ── Add + ReLU ──────────────────────────────────────────────
+lgraph = addLayers(lgraph, additionLayer(2, 'Name', [blockName '_add']));
+lgraph = addLayers(lgraph, reluLayer('Name', [blockName '_out']));
 
-lgraph = addLayers(lgraph, add_layer);
-lgraph = addLayers(lgraph, relu_layer);
-
-lgraph = connectLayers(lgraph, [blockName '_bn2'], [blockName '_add/in1']);
-lgraph = connectLayers(lgraph, shortcut_out,        [blockName '_add/in2']);
+lgraph = connectLayers(lgraph, [blockName '_bn2'],  [blockName '_add/in1']);
+lgraph = connectLayers(lgraph, sc_out,              [blockName '_add/in2']);
 lgraph = connectLayers(lgraph, [blockName '_add'],  [blockName '_out']);
 
 end
