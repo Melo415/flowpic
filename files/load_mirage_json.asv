@@ -30,8 +30,6 @@ label_strings = {};
 
 fprintf('正在处理JSON文件');
 
-MIN_PACKETS = 10;   % 最小包数阈值
-
 for f = 1:length(json_files)
     if mod(f, 10) == 0
         fprintf('.');
@@ -219,8 +217,9 @@ for f = 1:length(json_files)
             lengths = lengths(valid_idx);
             directions = directions(valid_idx);
             
-            % 至少要有MIN_PACKETS个包（可根据需求调整）
-            if length(times) >= MIN_PACKETS
+            % 至少要有min_length个包（可根据需求调整）
+            pac_length = 5
+            if length(times) >= pac_length
                 flow = struct();
                 flow.lengths = lengths;
                 flow.times = times;

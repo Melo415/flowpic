@@ -78,7 +78,7 @@ main = [
                        'Stride', stride, 'Name', [blockName '_conv1'])
     batchNormalizationLayer('Name', [blockName '_bn1'])
     reluLayer('Name',          [blockName '_relu1'])
-    dropoutLayer(0.2, 'Name',  [blockName '_drop'])     % 论文 dropout=0.2
+    dropoutLayer(0.35, 'Name',  [blockName '_drop'])     % 论文 dropout=0.2
     convolution2dLayer(3, numFilters, 'Padding', 'same', ...
                        'Name', [blockName '_conv2'])
     batchNormalizationLayer('Name', [blockName '_bn2'])
