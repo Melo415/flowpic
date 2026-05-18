@@ -1,59 +1,111 @@
-# FlowPic 加密流量分类器
+# 基于深度学习的加密流量分类
 
-基于二维直方图表示（FlowPic）与自定义 ResNet 架构的加密网络流量分类系统，使用 MATLAB 实现。
+基于 FlowPic 框架与深度残差卷积网络的加密网络流量分类系统，参考 Poliakov et al. (2025) 论文实现，使用 MATLAB 深度学习工具箱完成全流程开发。
 
-> **测试准确率：70.99%**　·　MIRAGE-19 数据集　·　18 个流量类别　·　102,269 条网络流
+**在 MIRAGE-19 数据集（18类应用）上测试集准确率达到 73.94%**
 
 ---
 
 ## 项目简介
 
-随着 TLS/QUIC 协议的普及，传统深度包检测（DPI）方法已无法有效分析加密流量。本项目采用**载荷无关**的方法：将每条网络流转换为包长度与包间隔时间（IAT）的二维联合直方图，生成 64×64×4 的"流量指纹"图像（FlowPic），再通过残差卷积神经网络完成分类。
+HTTPS、VPN、Tor 等协议的广泛普及使传统深度包检测（DPI）方法几乎完全失效——载荷已被加密，无法直接解析。本项目在**不解密流量内容**的前提下，仅利用数据包的长度、到达时间间隔（IAT）和传输方向等元数据，实现对加密流量的多类别识别。
 
-```
-原始网络流  →  FlowPic（64×64×4）  →  ResNet  →  流量类别
-（长度+IAT）      二维直方图            3个残差块    （18类）
-```
-
-### 三大核心创新
-
-| 创新点 | 说明 |
-|--------|------|
-| **完整概率分布表示** | 用直方图捕获包长度的完整分布形态，而非仅依赖均值、方差等统计量 |
-| **二维联合直方图** | 同时编码包长度与 IAT 的相关性，保留了一维特征向量所丢失的时空联合信息 |
-| **带跳跃连接的深度 ResNet** | 通过 `output = F(x) + x` 的残差结构解决梯度消失，实现对直方图细粒度空间模式的学习 |
+核心思路是将每条流量会话转换为**四通道二维直方图图像**，再送入端到端训练的 ResNet 分类器进行识别。
 
 ---
 
-## 网络架构
+## 方法
+
+### 流量表示
+
+取每条流量会话的**前 15 秒**数据，按传输方向（上行 / 下行）分组，分别针对两种特征构建二维直方图：
+
+- **包长度 × 时间** → 二维直方图
+- **包间时间间隔（IAT）× 时间** → 二维直方图
+
+上行 + 下行 × 两种特征，共生成 **H × W × 4** 的四通道张量作为模型输入。
+
+对直方图数值先做 **log1p 变换**，再进行逐通道 **min-max 归一化**到 [0, 1]，以消除数值量纲差异并压缩长尾分布。
+
+### 模型架构
 
 ```
-输入层（64×64×4）
-     │
-  Conv 7×7, 64通道 → BN → ReLU → MaxPool（stride=2）
-     │
-  残差块 1 — 64 filters
-     │
-  残差块 2 — 128 filters（stride=2 下采样）
-     │
-  残差块 3 — 256 filters（stride=2 下采样）
-     │
-  Global Average Pooling
-     │
-  FC(256) → BN → ReLU → Dropout(0.5)
-     │
-  FC(18) → Softmax
+输入: 32×32×4
+
+Stem:  Conv(7×7, 64) → BN → ReLU → MaxPool(stride=2)         →  16×16×64
+
+Res1:  Conv(3×3, 64)  → BN → ReLU → Dropout(0.35)
+       Conv(3×3, 64)  → BN → (+shortcut) → ReLU               →  16×16×64
+
+Res2:  Conv(3×3, 128, stride=2) → BN → ReLU → Dropout(0.35)
+       Conv(3×3, 128)            → BN → (+shortcut_conv) → ReLU →  8×8×128
+
+AvgPool(4×4, stride=4)  →  2×2×128  →  展平 512 维
+
+FC(512→256) → ReLU → Dropout(0.5)
+FC(256→18)  → Softmax
 ```
 
-每个残差块结构：`Conv→BN→ReLU→Dropout(0.15)→Conv→BN → + shortcut → ReLU`，其中下采样块的 shortcut 分支使用 1×1 卷积对齐通道数。
+### 训练配置
+
+| 参数 | 值 |
+|------|-----|
+| 优化器 | Adam |
+| 初始学习率 | 0.001 |
+| 学习率衰减 | 第 40 轮以因子 0.3 衰减 |
+| 最大训练轮数 | 80 |
+| Batch Size | 128 |
+| L2 正则化系数 | 0.0005 |
+| 梯度裁剪阈值 | 1.0 |
+| Early Stopping patience | 20（基于验证集损失） |
+| 数据集划分 | 训练 80% / 验证 10% / 测试 10%（分层抽样） |
+
+**数据增强说明：** 未使用翻转、平移等常规图像增强操作——此类操作会破坏直方图中包长和时间的物理语义。仅对训练集施加弱高斯噪声（概率 0.5，标准差 0.05）以提升鲁棒性。
 
 ---
 
-## 环境要求
+## 数据集
 
-- **MATLAB** R2021b 及以上
-- **Deep Learning Toolbox**
-- （可选）支持 CUDA 的 GPU — CPU 也可运行，但训练时间将显著增加
+使用 **MIRAGE-19** 公开数据集。
+
+| 属性 | 详情 |
+|------|------|
+| 总流数 | 122,007 |
+| 应用类别数 | 18 |
+| 数据格式 | JSON（每文件对应一个应用） |
+| 最小包数阈值 | 10 个包/流 |
+
+数据集官方地址：[MIRAGE-2019](http://traffic.comics.unina.it/mirage/MIRAGE-2019.html)
+
+下载后将数据放置于 `data/mirage/` 目录，脚本会自动扫描所有 JSON 文件。
+
+---
+
+## 实验结果
+
+### 最优实验配置
+
+| 指标 | 数值 |
+|------|------|
+| 测试集准确率 | **73.94%** |
+| 验证集 Loss 最低值 | 0.9205（第 17958 次迭代） |
+| 对应验证准确率 | 73.43% |
+| 验证集准确率峰值 | 73.66%（第 19710 次迭代） |
+| 训练时长 | 约 48 分钟（单 GPU） |
+
+> 当前保存的模型来自验证集 Loss 最低的轮次。验证损失最低点与准确率最高点不重合，是因为两者衡量的目标不同；以损失最低点保存模型，泛化性通常更稳定。
+
+### 混淆矩阵
+
+![混淆矩阵](confusion_matrix.png)
+
+大多数类别分类效果良好，少数样本量较小的类别存在一定混淆，与类别分布不均衡有关。
+
+### 训练曲线
+
+![训练进度](training_curves.png)
+
+学习率在第 40 轮下降后，训练集与验证集的准确率差距有所扩大，存在轻度过拟合现象。
 
 ---
 
@@ -61,164 +113,73 @@
 
 ```
 flowpic/
-├── COMPLETE_TRAINING.m            # 主入口，直接运行此文件
-├── create_flowpic_model.m         # ResNet 模型定义
-├── generate_flowpic.m             # 网络流 → 64×64×4 FlowPic 转换
-├── load_mirage_json.m             # MIRAGE-19 JSON 数据加载
-├── run_training_with_logging.m    # 训练循环 + 实验日志记录
-├── figures/                       # 自动生成的训练曲线图
-├── models/                        # 模型检查点保存目录
-└── training_results/              # 各次实验的日志与汇总报告
+├── data/
+│   ├── mirage/                  # MIRAGE-19 原始 JSON 数据（需自行下载）
+│   └── flowpic_cache.mat        # 预处理缓存（首次运行自动生成）
+├── COMPLETE_TRAINING.m          # 主训练脚本（一键运行）
+├── create_flowpic_model.m       # ResNet 模型定义
+├── generate_flowpic.m           # 四通道 FlowPic 直方图生成
+├── load_mirage_json.m           # MIRAGE-19 数据加载与预处理
+├── run_training_with_logging.m  # 训练封装 + 实验记录
+└── files/
+    └── training_results/        # 每次实验自动生成结果文件夹
+        ├── experiment_summary.md
+        ├── hyperparameters.txt
+        ├── confusion_matrix.png
+        ├── training_curves.png
+        └── final_results.mat
 ```
 
 ---
 
 ## 快速开始
 
-**第一步：下载数据集**
+### 环境要求
 
-获取 [MIRAGE-19 数据集](http://traffic.comics.unina.it/mirage/) 并解压到：
-```
-data/mirage/
-```
+- MATLAB R2021a 及以上
+- Deep Learning Toolbox
+- （可选）Parallel Computing Toolbox（用于 GPU 加速）
 
-**第二步：配置数据路径**
+### 运行步骤
 
-打开 `COMPLETE_TRAINING.m`，修改第一部分中的路径：
+**1. 准备数据**
+
+下载 MIRAGE-19 数据集，解压至 `data/mirage/`。
+
+**2. 修改路径**
+
+打开 `COMPLETE_TRAINING.m`，将以下两行改为本地实际路径：
+
 ```matlab
 DATASET_PATH = 'your/path/to/data/mirage';
 CACHE_FILE   = 'your/path/to/data/flowpic_cache.mat';
 ```
 
-**第三步：运行训练**
+**3. 运行训练**
 
-```matlab
-% 在 MATLAB 命令窗口中：
-cd your/path/to/flowpic
-COMPLETE_TRAINING
-```
+直接运行 `COMPLETE_TRAINING.m`，脚本将按顺序完成：
 
-首次运行会自动生成 FlowPic 并保存缓存文件（约 22 秒），后续运行直接加载缓存跳过此步骤。**修改 `FLOWPIC_SIZE` 或归一化方式后，需手动删除缓存文件重新生成。**
+- 数据加载与 FlowPic 生成（首次运行约需数分钟，结果自动缓存）
+- 数据集划分与增强
+- 模型构建与训练
+- 测试集评估与结果保存
 
----
+训练结束后，混淆矩阵、训练曲线、超参数记录等结果自动保存至 `files/training_results/` 下对应时间戳的文件夹中。
 
-## 参数配置
-
-所有超参数集中在 `COMPLETE_TRAINING.m` 第一部分配置：
-
-```matlab
-%% FlowPic 配置
-FLOWPIC_SIZE   = 64;       % 分辨率：32 | 48 | 64（64需要至少8GB可用内存）
-NUM_CHANNELS   = 4;        % 通道：上行包长、下行包长、上行IAT、下行IAT
-
-%% 训练超参数
-MAX_EPOCHS     = 150;
-BATCH_SIZE     = 64;       % GPU显存不足时改为32
-LEARNING_RATE  = 0.0005;
-L2_REG         = 0.0001;
-
-%% 数据增强（仅训练集，保留时序语义）
-USE_AUGMENTATION = true;
-AUG_NOISE_PROB   = 0.35;  % 弱高斯噪声触发概率
-AUG_NOISE_STD    = 0.02;  % 噪声强度
-```
-
-> **内存说明：** 64×64 全量数据集约需 6.7 GB（single 精度）。内存不足时可改用 `FLOWPIC_SIZE = 48`（约 3.8 GB）或 `32`（约 1.7 GB）。
+> ⚠️ **注意：** 若修改了 `FLOWPIC_SIZE` 或归一化方式，需手动删除 `flowpic_cache.mat` 重新生成缓存，否则旧缓存会导致结果异常。
 
 ---
 
-## 数据集
+## 主要结论
 
-**MIRAGE-19**：102,269 条标注网络流，覆盖 18 个移动应用类别：
-
-| ID | 应用 | 样本数 | ID | 应用 | 样本数 |
-|----|------|--------|----|------|--------|
-| 1 | slither | 2,040 | 10 | comics | 4,227 |
-| 2 | groupon | 1,408 | 11 | pinterest | 2,882 |
-| 3 | tripadvisor | 2,441 | 12 | trello | 1,516 |
-| 4 | android | 14,014 | 13 | foursquared | 4,800 |
-| 5 | duolingo | 5,939 | 14 | katana | 3,364 |
-| 6 | subito | 5,807 | 15 | orca | 1,836 |
-| 7 | voip | 2,062 | 16 | wish | 4,308 |
-| 8 | music | 4,458 | 17 | youtube | 3,165 |
-| 9 | iliga | 8,352 | 18 | waze | 9,197 |
-
-数据集存在**类别不均衡**（android 14,014 vs. groupon 1,408，约 10:1）。训练时采用逆频率类别权重进行补偿。
-
-**数据划分（分层抽样，保证各类比例一致）：**
-
-| 子集 | 比例 | 样本数（约） |
-|------|------|--------|
-| 训练集 | 80% | 81,815 |
-| 验证集 | 10% | 10,227 |
-| 测试集 | 10% | 10,227 |
-
----
-
-## 实验结果
-
-在独立测试集上的评估结果（与上一版 32×32 对比）：
-
-| 配置 | 测试准确率 | 训练时长 |
-|------|-----------|--------|
-| ResNet，32×32×4 | 65.94% | 18.4 分钟 |
-| ResNet，64×64×4（当前） | **70.99%** | 373.4 分钟 |
-
-**各类别表现（基于混淆矩阵）：**
-
-| 表现 | 类别 | 召回率估算 |
-|------|------|-----------|
-| 优秀 | waze、music、duolingo、comics | > 85% |
-| 良好 | iliga、subito、foursquared、wish | 70–85% |
-| 较弱 | tripadvisor、groupon、orca | < 65% |
-
-主要混淆对：class 14（katana）↔ class 15（orca）存在明显相互误判，两者在当前分辨率下 FlowPic 特征高度相似。
-
----
-
-## FlowPic 原理
-
-一条网络流包含一系列数据包，每个包有：
-- `lengths`：包的字节大小
-- `times`：相邻包之间的时间间隔（IAT）
-- `directions`：上行（设备→服务器）或下行（服务器→设备）
-
-`generate_flowpic.m` 将上行/下行数据分别统计为包长×IAT 的二维直方图，生成 4 通道图像，每个通道对应一种流量维度的分布。
-
-**归一化流程：**
-```
-原始计数值  →  log1p(x)  →  逐通道 min-max 归一化到 [0, 1]
-```
-
-log1p 变换用于压缩直方图中极度不均匀的计数分布（大量零值 + 少量大值），使网络训练更稳定。
-
----
-
-## 实验记录
-
-每次训练结束后，`run_training_with_logging.m` 会自动在 `training_results/` 下生成带时间戳的实验文件夹：
-
-```
-training_results/
-└── exp_YYYYMMDD_HHMMSS/
-    ├── experiment_summary.md    # 实验总结（准确率、时长、超参数）
-    ├── confusion_matrix.png     # 测试集混淆矩阵
-    ├── hyperparameters.txt      # 超参数记录
-    ├── dataset_distribution.csv # 数据集分布与类别权重
-    ├── experiment_info.mat      # 完整实验元信息
-    └── final_results.mat        # 模型与评估结果
-```
+- **数据增强需与语义相符：** 常规图像翻转、平移等操作会破坏流量直方图中包长和时间的物理含义，屏蔽此类操作后准确率提升约 10%。
+- **验证损失最低 ≠ 验证准确率最高：** 两者出现在不同训练步，以损失最低点保存模型泛化性更稳定。
+- **类别不均衡影响少数类：** 混淆矩阵显示性能较弱的类别集中于样本量较少的应用，后续可通过更精细的采样策略加以改善。
+- **轻度过拟合仍有改善空间：** 学习率衰减后训练集与验证集差距扩大，可进一步探索更强正则化或 Mixup 等增强策略。
 
 ---
 
 ## 参考文献
 
-- Shapira, T. & Shavitt, Y. (2021). *FlowPic: A Generic Representation for Encrypted Traffic Classification and Applications Identification.* IEEE Transactions on Network and Service Management.
-- Luxemburk, J. & Čejka, T. (2023). *Fine-grained TLS services classification with reject option.* Computer Networks.
-- MIRAGE-19 数据集：[traffic.comics.unina.it/mirage](http://traffic.comics.unina.it/mirage/)
-
----
-
-## License
-
-MIT License — 详见 [LICENSE](LICENSE) 文件。
+- Poliakov et al. (2025). *FlowPic: Encrypted Internet Traffic Classification is as Easy as Image Recognition.*
+- MIRAGE-2019 Dataset. University of Naples Federico II. http://traffic.comics.unina.it/mirage/
